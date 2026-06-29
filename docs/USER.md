@@ -158,7 +158,7 @@ Open from **Profile → Manage Users**:
 
 ### Primary admin account
 
-The seed admin (`DASHBOARD_USER`, usually **admin**) is marked **primary**:
+The seed admin (`DASHBOARD_USER`, usually **admin**) is marked **primary** with the **Elite** edition:
 
 - Cannot be deleted or have tier/role changed
 - Only **Password** reset available in the user table

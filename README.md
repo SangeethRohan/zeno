@@ -13,8 +13,12 @@ The current **stable release is 2.0**. See [Release history](#release-history) b
 
 ## Quick start
 
+Clone the repository and start the stack:
+
 ```bash
-docker compose -f docker-compose.yml -f backend/docker-compose.mongo.yml up -d --build
+git clone git@github.com:SangeethRohan/zeno.git
+cd zeno
+docker compose -f docker-compose.yml -f docker-compose.mongo.yml up -d --build
 ```
 
 Open **http://localhost:9090** and sign in with **admin** / **admin**. Change these credentials immediately in any shared or production environment.
@@ -46,6 +50,25 @@ MongoDB is required for authentication, per-user settings, metrics history, aler
 ## Security notice
 
 The dashboard mounts `/var/run/docker.sock` and can manage every container on the host. Treat dashboard credentials like root access. Do not expose port **9090** to the public internet without TLS, strong passwords, and network restrictions.
+
+## Repository layout
+
+```
+zeno/                               # repository root
+├── docker-compose.yml              # Dashboard service (port 9090, Docker socket)
+├── docker-compose.mongo.yml        # MongoDB overlay (zeno_mongo)
+├── compose-snippet.yml             # Embed dashboard in another compose project
+├── server/                         # Flask API + static frontend
+│   ├── app.py
+│   ├── db.py
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── static/
+├── docs/
+│   ├── USER.md
+│   └── DEVELOPER.md
+└── README.md
+```
 
 See [docs/DEVELOPER.md](docs/DEVELOPER.md) for environment variables, API reference, and deployment guidance.
 

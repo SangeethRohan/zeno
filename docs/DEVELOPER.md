@@ -2,7 +2,7 @@
 
 Technical reference for engineers deploying, extending, and operating the Zeno container dashboard.
 
-The application version is defined in `backend/app.py` as `APP_VERSION`. The current **stable release is 2.0**.
+The application version is defined in `server/app.py` as `APP_VERSION`. The current **stable release is 2.0**.
 
 ## Release history
 
@@ -35,12 +35,13 @@ The application version is defined in `backend/app.py` as `APP_VERSION`. The cur
 ## Repository layout
 
 ```
-container-dashboard/
+zeno/
 ├── docker-compose.yml              # Dashboard service (port 9090, Docker socket)
-├── backend/
+├── docker-compose.mongo.yml          # MongoDB 7 overlay (zeno_mongo)
+├── compose-snippet.yml             # Embed dashboard in an existing compose stack
+├── server/
 │   ├── app.py                      # Flask application, Docker integration, collector thread
 │   ├── db.py                       # MongoDB access layer, business logic, schemas
-│   ├── docker-compose.mongo.yml    # MongoDB 7 overlay (zeno_mongo)
 │   ├── Dockerfile                  # Python 3.12 slim image; static assets baked in
 │   ├── requirements.txt            # Pinned Python dependencies
 │   └── static/
@@ -95,7 +96,7 @@ container-dashboard/
 ## Quick start and configuration
 
 ```bash
-docker compose -f docker-compose.yml -f backend/docker-compose.mongo.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.mongo.yml up -d --build
 ```
 
 Dashboard: **http://localhost:9090**
@@ -185,7 +186,7 @@ Feature matrix stored in `settings` document `key: tier_features`. Defaults in `
 
 ### Primary admin
 
-The seed user (`DASHBOARD_USER`) receives `is_primary: true`:
+The seed user (`DASHBOARD_USER`) receives `is_primary: true` and `tier: Elite`:
 
 - Cannot be deleted (`delete_user` raises).
 - `tier` and `role` cannot change via `PATCH /users/<username>`.
@@ -546,7 +547,7 @@ Edit `CORE_APP_NAMES` and grouping in container serialization (`serialize()` / g
 ### Rebuild after code changes
 
 ```bash
-docker compose -f docker-compose.yml -f backend/docker-compose.mongo.yml up -d --build dashboard
+docker compose -f docker-compose.yml -f docker-compose.mongo.yml up -d --build dashboard
 ```
 
 Static assets are **copied into the image** at build time — there is no bind mount for `static/` in production compose.

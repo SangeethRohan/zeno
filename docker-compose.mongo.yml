@@ -1,5 +1,5 @@
-# Merge with parent compose:
-#   docker compose -f ../docker-compose.yml -f docker-compose.mongo.yml up -d --build
+# MongoDB overlay — merge with main compose:
+#   docker compose -f docker-compose.yml -f docker-compose.mongo.yml up -d --build
 
 services:
   zeno_mongo:

@@ -1,9 +1,11 @@
-# Add this service into your existing docker-compose.yml,
-# under the `services:` block (alongside postgres, mysql, etc).
+# Embed Zeno in an existing docker-compose.yml (clone this repo as ./zeno first):
+#   git clone git@github.com:SangeethRohan/zeno.git zeno
+#
+# Paste under your `services:` block:
 
   dashboard:
-    build: ./container-dashboard/backend
-    container_name: dev_dashboard
+    build: ./zeno/server
+    container_name: zeno_dashboard
     restart: always
     ports:
       - "9090:9090"

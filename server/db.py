@@ -13,6 +13,7 @@ MONGO_URI = os.environ.get(
 )
 DB_NAME = os.environ.get("MONGO_DB", "zeno")
 APP_TIERS = ("Core", "Pro", "Elite")
+PRIMARY_ADMIN_TIER = "Elite"
 DEFAULT_TIER = os.environ.get("APP_TIER", "Core")
 if DEFAULT_TIER not in APP_TIERS:
     DEFAULT_TIER = "Core"
@@ -64,7 +65,7 @@ def init_db(admin_user="admin", admin_pass="admin"):
             "username": admin_user,
             "password_hash": generate_password_hash(admin_pass),
             "role": "admin",
-            "tier": DEFAULT_TIER,
+            "tier": PRIMARY_ADMIN_TIER,
             "created_at": _now_iso(),
             "created_by": "system",
             "is_primary": True,
@@ -80,7 +81,7 @@ def init_db(admin_user="admin", admin_pass="admin"):
     )
     db.users.update_one(
         {"username": admin_user},
-        {"$set": {"is_primary": True}},
+        {"$set": {"is_primary": True, "tier": PRIMARY_ADMIN_TIER}},
     )
     db.users.update_many(
         {"username": {"$ne": admin_user}},
