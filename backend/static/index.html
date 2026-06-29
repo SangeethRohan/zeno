@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stack Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0B0E13;
+      --panel: #12161D;
+      --panel-2: #161B23;
+      --sidebar: #0D1117;
+      --border: #232A35;
+      --text: #E6EDF3;
+      --muted: #7C8694;
+      --green: #3FB950;
+      --red: #F85149;
+      --amber: #D29922;
+      --cyan: #4FC3D9;
+      --violet: #A684FF;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Inter', system-ui, sans-serif;
+      --sidebar-w: 208px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------- Sidebar ---------- */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: var(--sidebar-w);
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 20px 14px;
+    }
+
+    .brand {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 14px;
+      padding: 0 10px 22px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand .dotmark {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 2px;
+      transition: background .12s, color .12s;
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      background: var(--panel-2);
+      color: var(--text);
+    }
+
+    .nav-item.active {
+      background: rgba(79, 195, 217, .1);
+      color: var(--cyan);
+    }
+
+    .nav-item .ic {
+      width: 16px;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .sidebar-foot {
+      margin-top: auto;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: #4A5260;
+      padding: 0 10px;
+    }
+
+    /* ---------- Top bar ---------- */
+    .topbar {
+      position: fixed;
+      top: 0;
+      right: 0;
+      left: var(--sidebar-w);
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      z-index: 5;
+    }
+
+    .topbar h1 {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .topbar .sub {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .profile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px 6px 6px;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      cursor: pointer;
+      background: var(--panel);
+    }
+
+    .profile:hover {
+      border-color: #333D4A;
+    }
+
+    .avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--cyan), var(--violet));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 13px;
+      color: #0B0E13;
+      flex-shrink: 0;
+    }
+
+    .profile-text {
+      line-height: 1.25;
+    }
+
+    .profile-name {
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .profile-host {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+    }
+
+    /* ---------- Layout shell ---------- */
+    .shell {
+      margin-left: var(--sidebar-w);
+      padding-top: 64px;
+    }
+
+    main {
+      padding: 24px 32px 60px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .view {
+      display: none;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    /* ---------- Host stats ---------- */
+    .host-panel {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+
+    @media (max-width:680px) {
+      .host-panel {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .host-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .host-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+
+    .host-card-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .host-card-value {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .host-card-sub {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    canvas.spark {
+      width: 100%;
+      height: 54px;
+      display: block;
+    }
+
+    /* ---------- Container rows ---------- */
+    .group {
+      margin-bottom: 32px;
+    }
+
+    .group-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      padding-left: 2px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .row {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+      transition: border-color .15s;
+    }
+
+    .row:hover {
+      border-color: #2E3744;
+    }
+
+    .row-main {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 13px 16px;
+      cursor: pointer;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .dot.running {
+      background: var(--green);
+      box-shadow: 0 0 0 0 rgba(63, 185, 80, .5);
+      animation: pulse 2s infinite;
+    }
+
+    .dot.exited {
+      background: var(--red);
+    }
+
+    .dot.paused,
+    .dot.restarting {
+      background: var(--amber);
+    }
+
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(63, 185, 80, .45);
+      }
+
+      70% {
+        box-shadow: 0 0 0 6px rgba(63, 185, 80, 0);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+      }
+    }
+
+    .name {
+      font-family: var(--mono);
+      font-weight: 500;
+      font-size: 13.5px;
+      min-width: 170px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stat {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      min-width: 90px;
+      text-align: right;
+    }
+
+    .badge {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .badge.running {
+      background: rgba(63, 185, 80, .12);
+      color: var(--green);
+    }
+
+    .badge.exited {
+      background: rgba(248, 81, 73, .12);
+      color: var(--red);
+    }
+
+    .badge.paused,
+    .badge.restarting {
+      background: rgba(210, 153, 34, .12);
+      color: var(--amber);
+    }
+
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    button {
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 6px 11px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+    }
+
+    button:hover {
+      background: #1C232D;
+      border-color: #333D4A;
+    }
+
+    button.primary {
+      color: var(--cyan);
+      border-color: #2A4750;
+    }
+
+    button.danger {
+      color: var(--red);
+      border-color: #4A2A28;
+    }
+
+    button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+
+    .open-link {
+      color: var(--cyan);
+      text-decoration: none;
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 10px;
+      border: 1px solid #2A4750;
+      border-radius: 5px;
+    }
+
+    .open-link:hover {
+      background: rgba(79, 195, 217, .08);
+    }
+
+    .details {
+      border-top: 1px solid var(--border);
+      background: #0E1218;
+      padding: 14px 16px;
+      display: none;
+    }
+
+    .details.open {
+      display: block;
+    }
+
+    .details .ports {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .details .ports span {
+      color: var(--text);
+    }
+
+    pre.logs {
+      background: #080A0D;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: #A8B3C0;
+      max-height: 280px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+    }
+
+    .logs-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .logs-head span {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      font-family: var(--mono);
+      padding: 60px 0;
+      font-size: 13px;
+    }
+
+    .error-banner {
+      background: rgba(248, 81, 73, .1);
+      border: 1px solid #4A2A28;
+      color: var(--red);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+
+    .success-banner {
+      background: rgba(63, 185, 80, .1);
+      border: 1px solid #2E5E36;
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+
+    /* ---------- Create DB form ---------- */
+    #view-create-db {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    .form-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      width: 100%;
+    }
+
+    .form-card h2 {
+      margin: 0 0 4px;
+      font-size: 16px;
+    }
+
+    .form-card .hint {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .field-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .field {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field label {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .field input,
+    .field select {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 11px;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      outline: none;
+      border-color: var(--cyan);
+    }
+
+    .engine-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .engine-opt {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 12px 8px;
+      text-align: center;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 12px;
+      transition: border-color .12s, background .12s;
+    }
+
+    .engine-opt:hover {
+      border-color: #333D4A;
+    }
+
+    .engine-opt.selected {
+      border-color: var(--cyan);
+      background: rgba(79, 195, 217, .08);
+      color: var(--cyan);
+    }
+
+    .section-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 20px 0 10px;
+    }
+
+    .table-block {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: var(--panel-2);
+    }
+
+    .table-block-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .table-block-head input {
+      flex: 1;
+    }
+
+    .col-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .col-row input {
+      flex: 2;
+    }
+
+    .col-row select {
+      flex: 1;
+    }
+
+    .small-btn {
+      padding: 4px 9px;
+      font-size: 11px;
+    }
+
+    .ghost-btn {
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      width: 100%;
+      padding: 8px;
+    }
+
+    .ghost-btn:hover {
+      color: var(--text);
+      border-color: var(--muted);
+    }
+
+    .submit-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .note {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 14px;
+      line-height: 1.5;
+    }
+
+    .result-block {
+      margin-top: 18px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .result-block .ok {
+      color: var(--green);
+    }
+
+    .result-block .bad {
+      color: var(--red);
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+      font-family: var(--sans);
+    }
+
+    .toggle input {
+      display: none;
+    }
+
+    .slider {
+      width: 46px;
+      height: 24px;
+      background: var(--border);
+      border-radius: 999px;
+      position: relative;
+      transition: .2s;
+    }
+
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: #fff;
+      transition: .2s;
+    }
+
+    .toggle input:checked+.slider {
+      background: var(--cyan);
+    }
+
+    .toggle input:checked+.slider::before {
+      transform: translateX(22px);
+    }
+
+    .toggle-text {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .field .hint {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="sidebar">
+    <div class="brand"><span class="dotmark"></span> stack control</div>
+    <div class="nav-item active" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
+    <div class="nav-item" data-view="create-db"><span class="ic">+</span> Create Database</div>
+    <div class="sidebar-foot">v1.1 / docker socket</div>
+  </div>
+
+  <div class="topbar">
+    <div>
+      <h1 id="page-title">Dashboard</h1>
+      <div class="sub" id="page-sub">local dev environment</div>
+    </div>
+    <div class="profile" id="profile-chip">
+      <div class="avatar" id="avatar-initials">?</div>
+      <div class="profile-text">
+        <div class="profile-name" id="profile-name">—</div>
+        <div class="profile-host" id="profile-host">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <main>
+
+      <!-- ================= DASHBOARD VIEW ================= -->
+      <section class="view active" id="view-dashboard">
+        <div id="error" class="error-banner" style="display:none;"></div>
+
+        <div class="host-panel">
+          <div class="host-card">
+            <div class="host-card-top">
+              <span class="host-card-label">Host CPU</span>
+              <span class="host-card-value" id="cpu-value">—</span>
+            </div>
+            <canvas class="spark" id="cpu-chart"></canvas>
+            <div class="host-card-sub" id="cpu-sub">load avg —</div>
+          </div>
+          <div class="host-card">
+            <div class="host-card-top">
+              <span class="host-card-label">Host Memory</span>
+              <span class="host-card-value" id="mem-value">—</span>
+            </div>
+            <canvas class="spark" id="mem-chart"></canvas>
+            <div class="host-card-sub" id="mem-sub">— used / — total</div>
+          </div>
+        </div>
+
+        <div id="content">
+          <div class="empty">Loading containers…</div>
+        </div>
+      </section>
+
+      <!-- ================= CREATE DB VIEW ================= -->
+      <section class="view" id="view-create-db">
+        <div id="create-error" class="error-banner" style="display:none;"></div>
+        <div id="create-success" class="success-banner" style="display:none;"></div>
+
+        <div class="form-card">
+          <h2>Spin up a new database</h2>
+          <div class="hint">Creates a persistent container with its own volume. It restarts automatically on reboot
+            unless you've turned it off.</div>
+
+          <div class="section-label">Engine</div>
+          <div class="engine-grid" id="engine-grid">
+            <div class="engine-opt selected" data-engine="postgres">Postgres</div>
+            <div class="engine-opt" data-engine="mysql">MySQL</div>
+            <div class="engine-opt" data-engine="mongo">MongoDB</div>
+            <div class="engine-opt" data-engine="redis">Redis</div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Identifier (used in container name)</label>
+              <input type="text" id="f-name" placeholder="e.g. clients-db" />
+            </div>
+            <div class="field">
+              <label>Host port</label>
+              <input type="number" id="f-port" placeholder="e.g. 5440" />
+            </div>
+          </div>
+
+          <div class="field-row" id="row-username">
+            <div class="field">
+              <label>Username</label>
+              <input type="text" id="f-username" placeholder="e.g. appuser" />
+            </div>
+            <div class="field">
+              <label>Password</label>
+              <input type="password" id="f-password" placeholder="min 4 characters" />
+            </div>
+          </div>
+
+          <div class="field-row" id="row-dbname">
+            <div class="field">
+              <label>Database name</label>
+              <input type="text" id="f-dbname" placeholder="e.g. clients" />
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Storage Mode</label>
+
+              <label class="toggle">
+                <input type="checkbox" id="f-persistent" checked>
+                <span class="slider"></span>
+                <span class="toggle-text">Persistent Storage</span>
+              </label>
+
+              <small class="hint">
+                OFF = Temporary database (data is deleted when the container is removed).
+              </small>
+            </div>
+          </div>
+
+          <div class="section-label" id="tables-label">Tables</div>
+          <div id="tables-container"></div>
+          <button class="ghost-btn" id="add-table-btn" type="button">+ Add table</button>
+
+          <div class="submit-row">
+            <button class="primary" id="submit-db-btn" type="button">Create database</button>
+          </div>
+
+          <div class="note">
+            The container is tagged so it shows up under <b>My Databases</b> on the dashboard, where you can
+            start/stop/restart it like anything else, or remove it for good.
+          </div>
+
+          <div class="result-block" id="result-block"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    const API = '';
+    let containers = [];
+    let openRows = new Set();
+    let openLogs = new Set();
+    let selectedEngine = 'postgres';
+    let tableCount = 0;
+
+    const HISTORY_LEN = 40;
+    const cpuHistory = [];
+    const memHistory = [];
+    const statsCache = new Map();
+    let containerListKey = '';
+    let hostStatsTimer = null;
+    let containerRefreshTimer = null;
+    let statsRefreshTimer = null;
+    let resizeRaf = null;
+
+    const loadedLogs = new Set();
+
+    const COL_TYPES = ['TEXT', 'VARCHAR(255)', 'INTEGER', 'BIGINT', 'BOOLEAN', 'TIMESTAMP', 'DECIMAL(10,2)'];
+
+    async function api(path, opts = {}) {
+      const res = await fetch(API + path, opts);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(body.error || res.statusText);
+      }
+      return res.json();
+    }
+
+    /* ---------------- Navigation ---------------- */
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        const view = item.dataset.view;
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById('view-' + view).classList.add('active');
+        document.getElementById('page-title').textContent =
+          view === 'dashboard' ? 'Dashboard' : 'Create Database';
+        document.getElementById('page-sub').textContent =
+          view === 'dashboard' ? 'local dev environment' : 'spin up a new persistent db container';
+      });
+    });
+
+    /* ---------------- Profile ---------------- */
+    async function loadProfile() {
+      try {
+        const p = await api('/api/profile');
+        document.getElementById('profile-name').textContent = p.username;
+        document.getElementById('profile-host').textContent = p.host;
+        document.getElementById('avatar-initials').textContent = p.username.slice(0, 2).toUpperCase();
+      } catch (e) {
+        document.getElementById('profile-name').textContent = 'unknown';
+      }
+    }
+
+    /* ---------------- Dashboard (containers + host stats) ---------------- */
+    function showError(msg) {
+      const el = document.getElementById('error');
+      if (!msg) { el.style.display = 'none'; return; }
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function statusClass(c) {
+      if (c.status === 'running') return 'running';
+      if (c.status === 'paused' || c.status === 'restarting') return c.status;
+      return 'exited';
+    }
+
+    function fmtSince(iso) {
+      if (!iso || iso.startsWith('0001')) return '—';
+      const d = new Date(iso);
+      const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + 'm';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + 'h';
+      return Math.floor(hrs / 24) + 'd';
+    }
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el && el.textContent !== text) el.textContent = text;
+    }
+
+    function formatStatsDisplay(s) {
+      return {
+        cpu: `${Number(s.cpu).toFixed(2)}%`,
+        mem: s.memory,
+        net: `↓ ${s.network_rx} ↑ ${s.network_tx}`,
+        disk: `R ${s.block_read} W ${s.block_write}`,
+      };
+    }
+
+    function cachedStatTexts(name) {
+      const cached = statsCache.get(name);
+      if (!cached) {
+        return { cpu: '…', mem: '…', net: '…', disk: '…' };
+      }
+      return formatStatsDisplay(cached);
+    }
+
+    function applyStatsToDom(name, s) {
+      const d = formatStatsDisplay(s);
+      setText(`cpu-${name}`, d.cpu);
+      setText(`mem-${name}`, d.mem);
+      setText(`net-${name}`, d.net);
+      setText(`disk-${name}`, d.disk);
+    }
+
+    function containersListKey(list) {
+      return list.map(c => `${c.name}|${c.status}|${c.image}|${c.started_at}|${c.ports.join(',')}|${c.group}`).join('\n');
+    }
+
+    function drawSpark(canvas, data, color) {
+      if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (w === 0 || h === 0) return;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      if (data.length < 2) return;
+      const max = 100, pad = 4;
+      const stepX = (w - pad * 2) / (HISTORY_LEN - 1);
+      const startIdx = HISTORY_LEN - data.length;
+      const points = data.map((v, i) => {
+        const x = pad + (startIdx + i) * stepX;
+        const y = h - pad - (Math.min(v, max) / max) * (h - pad * 2);
+        return [x, y];
+      });
+      ctx.beginPath();
+      ctx.moveTo(points[0][0], h - pad);
+      points.forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.lineTo(points[points.length - 1][0], h - pad);
+      ctx.closePath();
+      ctx.fillStyle = color + '22';
+      ctx.fill();
+      ctx.beginPath();
+      points.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+      ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.stroke();
+      const [lx, ly] = points[points.length - 1];
+      ctx.beginPath(); ctx.arc(lx, ly, 2.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+    }
+
+    function pushHistory(arr, val) {
+      arr.push(val);
+      if (arr.length > HISTORY_LEN) arr.shift();
+    }
+
+    async function refreshHostStats() {
+      try {
+        const s = await api('/api/host/stats');
+        pushHistory(cpuHistory, s.cpu_percent);
+        pushHistory(memHistory, s.mem_percent);
+        setText('cpu-value', s.cpu_percent.toFixed(1) + '%');
+        const la = s.load_avg && s.load_avg[0] != null ? s.load_avg.map(v => v.toFixed(2)).join(' / ') : '—';
+        setText('cpu-sub', `load avg (1/5/15m): ${la}`);
+        setText('mem-value', s.mem_percent.toFixed(1) + '%');
+        setText('mem-sub', `${s.mem_used_gb} GB used / ${s.mem_total_gb} GB total`);
+        drawSpark(document.getElementById('cpu-chart'), cpuHistory, '#4FC3D9');
+        drawSpark(document.getElementById('mem-chart'), memHistory, '#A684FF');
+      } catch (e) { console.error('host stats error', e); }
+    }
+
+    async function refreshContainers() {
+      try {
+        const data = await api('/api/containers');
+        showError(null);
+        const nextKey = containersListKey(data);
+        containers = data;
+        if (nextKey !== containerListKey) {
+          containerListKey = nextKey;
+          render();
+        } else {
+          patchContainerRows();
+        }
+      } catch (e) {
+        showError('Could not reach the dashboard backend: ' + e.message);
+      }
+    }
+
+    function groupOrder(g) {
+      const order = ['My Databases', 'Databases', 'Tools & UI', 'Automation', 'Other'];
+      const i = order.indexOf(g);
+      return i === -1 ? order.length : i;
+    }
+
+    function renderActionsHtml(c) {
+      if (c.status === 'running') {
+        return `<button onclick="act('${c.name}','restart')">Restart</button>
+             <button class="danger" onclick="act('${c.name}','stop')">Stop</button>`;
+      }
+      let html = `<button class="primary" onclick="act('${c.name}','start')">Start</button>`;
+      if (c.status !== 'running') {
+        html += `<button class="danger" onclick="deleteContainer('${c.name}')">Delete</button>`;
+      }
+      return html;
+    }
+
+    function patchContainerRows() {
+      containers.forEach(c => {
+        const rowMain = document.getElementById('row-main-' + c.name);
+        if (!rowMain) return;
+        const cls = statusClass(c);
+        const dot = rowMain.querySelector('.dot');
+        if (dot) dot.className = 'dot ' + cls;
+        const meta = rowMain.querySelector('.meta');
+        if (meta) meta.textContent = c.image;
+        const stat = rowMain.querySelector('.stat');
+        if (stat) stat.textContent = c.status === 'running' ? 'up ' + fmtSince(c.started_at) : '—';
+        const badge = rowMain.querySelector('.badge');
+        if (badge) {
+          badge.className = 'badge ' + cls;
+          badge.textContent = c.status;
+        }
+        const actions = rowMain.querySelector('.actions');
+        if (actions) actions.innerHTML = renderActionsHtml(c);
+        const openLink = rowMain.querySelector('.open-link');
+        if (c.open_port) {
+          const href = `http://${location.hostname}:${c.open_port}`;
+          if (openLink) {
+            openLink.href = href;
+          } else {
+            rowMain.insertAdjacentHTML('beforeend',
+              `<a class="open-link" href="${href}" target="_blank" rel="noopener">Open ↗</a>`);
+          }
+        } else if (openLink) {
+          openLink.remove();
+        }
+        const details = document.getElementById('details-' + c.name);
+        if (details) {
+          const portsSpan = details.querySelector('.ports span');
+          const ports = c.ports.length ? c.ports.join(', ') : 'no published ports';
+          if (portsSpan) portsSpan.textContent = ports;
+        }
+      });
+    }
+
+    function render() {
+      const content = document.getElementById('content');
+      if (containers.length === 0) {
+        content.innerHTML = '<div class="empty">No containers found on this host.</div>';
+        return;
+      }
+      const groups = {};
+      containers.forEach(c => { (groups[c.group] = groups[c.group] || []).push(c); });
+      const sortedGroups = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b));
+
+      let html = '';
+      for (const g of sortedGroups) {
+        html += `<div class="group"><div class="group-label">${g}</div>`;
+        for (const c of groups[g]) html += renderRow(c);
+        html += `</div>`;
+      }
+      content.innerHTML = html;
+
+      containers.forEach(c => {
+        const rowEl = document.getElementById('row-main-' + c.name);
+        if (rowEl) rowEl.addEventListener('click', (e) => {
+          if (e.target.closest('button') || e.target.closest('a')) return;
+          toggleDetails(c.name);
+        });
+      });
+      openLogs.forEach(name => loadLogs(name));
+      openRows.forEach(name => {
+        const cached = statsCache.get(name);
+        if (cached) applyStatsToDom(name, cached);
+      });
+    }
+
+    function renderRow(c) {
+      const cls = statusClass(c);
+      const isOpen = openRows.has(c.name);
+      const ports = c.ports.length ? c.ports.join(', ') : 'no published ports';
+      const stats = cachedStatTexts(c.name);
+      return `
+  <div class="row">
+    <div class="row-main" id="row-main-${c.name}">
+      <div class="dot ${cls}"></div>
+      <div class="name">${c.name}</div>
+      <div class="meta">${c.image}</div>
+      <div class="stat">${c.status === 'running' ? 'up ' + fmtSince(c.started_at) : '—'}</div>
+      <div class="badge ${cls}">${c.status}</div>
+      <div class="actions">
+        ${renderActionsHtml(c)}
+      </div>
+      ${c.open_port ? `<a class="open-link" href="http://${location.hostname}:${c.open_port}" target="_blank" rel="noopener">Open ↗</a>` : ''}
+    </div>
+    <div class="details ${isOpen ? 'open' : ''}" id="details-${c.name}">
+      <div class="ports">Ports: <span>${ports}</span></div>
+
+      <div class="ports">
+      CPU:
+      <span id="cpu-${c.name}">${stats.cpu}</span>
+      &nbsp;&nbsp;|&nbsp;&nbsp;
+      Memory:
+      <span id="mem-${c.name}">${stats.mem}</span>
+      </div>
+
+      <div class="ports">
+      Network:
+      <span id="net-${c.name}">${stats.net}</span>
+      &nbsp;&nbsp;|&nbsp;&nbsp;
+      Disk:
+      <span id="disk-${c.name}">${stats.disk}</span>
+      </div>
+      <div class="logs-head">
+        <span>Recent logs</span>
+        <button onclick="loadLogs('${c.name}')">Refresh</button>
+      </div>
+      <pre class="logs" id="logs-${c.name}">${loadedLogs.has(c.name) ? '' : 'Loading…'}</pre>
+    </div>
+  </div>`;
+    }
+
+    async function toggleDetails(name) {
+      const el = document.getElementById('details-' + name);
+      if (openRows.has(name)) {
+        openRows.delete(name); openLogs.delete(name); el.classList.remove('open');
+      } else {
+        openRows.add(name); openLogs.add(name); el.classList.add('open');
+        await Promise.all([
+          loadStats(name),
+          loadedLogs.has(name)
+              ? Promise.resolve()
+              : loadLogs(name).then(() => loadedLogs.add(name))
+      ]);
+            }
+    }
+
+    async function loadLogs(name) {
+      const el = document.getElementById('logs-' + name);
+      if (!el) return;
+      try {
+        const data = await api(`/api/containers/${name}/logs?tail=200`);
+        el.textContent = data.logs || '(no log output)';
+        el.scrollTop = el.scrollHeight;
+      } catch (e) { el.textContent = 'Could not load logs: ' + e.message; }
+    }
+
+    async function loadStats(name) {
+      try {
+        const s = await api(`/api/containers/${name}/stats`);
+
+        statsCache.set(name, s);
+
+        if (!openRows.has(name)) return;
+
+        applyStatsToDom(name, s);
+
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function refreshOpenStats() {
+
+      if (openRows.size === 0) return;
+
+      for (const name of openRows) {
+        loadStats(name);
+      }
+
+      }
+
+    async function act(name, action) {
+      try {
+        await api(`/api/containers/${name}/${action}`, { method: 'POST' });
+        statsCache.delete(name);
+        containerListKey = '';
+        await refreshContainers();
+      } catch (e) { showError(`Failed to ${action} ${name}: ` + e.message); }
+    }
+
+    async function deleteContainer(name) {
+      if (!confirm(`Delete ${name}?`)) return;
+
+      try {
+        await api(`/api/containers/${name}`, {
+          method: 'DELETE'
+        });
+        openRows.delete(name);
+        openLogs.delete(name);
+        loadedLogs.delete(name);
+        statsCache.delete(name);
+        containerListKey = '';
+        await refreshContainers();
+      } catch (e) {
+        showError(`Failed to delete ${name}: ${e.message}`);
+      }
+    }
+
+    /* ---------------- Create DB form ---------------- */
+    document.querySelectorAll('.engine-opt').forEach(opt => {
+      opt.addEventListener('click', () => {
+        document.querySelectorAll('.engine-opt').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        selectedEngine = opt.dataset.engine;
+        applyEngineFieldVisibility();
+      });
+    });
+
+    function applyEngineFieldVisibility() {
+      const isRedis = selectedEngine === 'redis';
+      document.getElementById('row-username').style.display = isRedis ? 'none' : 'flex';
+      document.getElementById('row-dbname').style.display = isRedis ? 'none' : 'flex';
+      const tablesApplicable = selectedEngine === 'postgres' || selectedEngine === 'mysql' || selectedEngine === 'mongo';
+      document.getElementById('tables-label').textContent =
+        selectedEngine === 'mongo' ? 'Initial collections (optional)' : 'Initial tables (optional)';
+      document.getElementById('tables-label').style.display = tablesApplicable ? 'block' : 'none';
+      document.getElementById('tables-container').style.display = tablesApplicable ? 'block' : 'none';
+      document.getElementById('add-table-btn').style.display = tablesApplicable ? 'block' : 'none';
+    }
+    applyEngineFieldVisibility();
+
+    function addTableBlock() {
+      tableCount++;
+      const id = 'tbl_' + tableCount;
+      const wrap = document.createElement('div');
+      wrap.className = 'table-block';
+      wrap.id = id;
+      const isMongo = selectedEngine === 'mongo';
+      wrap.innerHTML = `
+    <div class="table-block-head">
+      <input type="text" placeholder="${isMongo ? 'collection name' : 'table name'}" class="tbl-name" />
+      <button class="small-btn danger" onclick="document.getElementById('${id}').remove()">✕</button>
+    </div>
+    <div class="cols-holder" style="display:${isMongo ? 'none' : 'block'}"></div>
+    <button class="ghost-btn small-btn" type="button" onclick="addColumnRow('${id}')" style="display:${isMongo ? 'none' : 'block'}">+ Add column</button>
+  `;
+      document.getElementById('tables-container').appendChild(wrap);
+      if (!isMongo) addColumnRow(id);
+    }
+
+    function addColumnRow(tableId) {
+      const holder = document.querySelector(`#${tableId} .cols-holder`);
+      const row = document.createElement('div');
+      row.className = 'col-row';
+      const typeOptions = COL_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
+      row.innerHTML = `
+    <input type="text" placeholder="column name" class="col-name" />
+    <select class="col-type">${typeOptions}</select>
+    <button class="small-btn danger" type="button" onclick="this.parentElement.remove()">✕</button>
+  `;
+      holder.appendChild(row);
+    }
+
+    document.getElementById('add-table-btn').addEventListener('click', addTableBlock);
+
+    function collectTables() {
+      const tables = [];
+      document.querySelectorAll('.table-block').forEach(block => {
+        const tname = block.querySelector('.tbl-name').value.trim();
+        if (!tname) return;
+        const columns = [];
+        block.querySelectorAll('.col-row').forEach(row => {
+          const cname = row.querySelector('.col-name').value.trim();
+          const ctype = row.querySelector('.col-type').value;
+          if (cname) columns.push({ name: cname, type: ctype });
+        });
+        tables.push({ name: tname, columns });
+      });
+      return tables;
+    }
+
+    function showCreateError(msg) {
+      const el = document.getElementById('create-error');
+      if (!msg) { el.style.display = 'none'; return; }
+      el.textContent = msg; el.style.display = 'block';
+    }
+    function showCreateSuccess(msg) {
+      const el = document.getElementById('create-success');
+      if (!msg) { el.style.display = 'none'; return; }
+      el.textContent = msg; el.style.display = 'block';
+    }
+
+    document.getElementById('submit-db-btn').addEventListener('click', async () => {
+      showCreateError(null); showCreateSuccess(null);
+      document.getElementById('result-block').innerHTML = '';
+
+      const payload = {
+        engine: selectedEngine,
+        name: document.getElementById('f-name').value.trim(),
+        host_port: document.getElementById('f-port').value,
+        username: document.getElementById('f-username').value.trim(),
+        password: document.getElementById('f-password').value,
+        db_name: document.getElementById('f-dbname').value.trim(),
+        tables: collectTables(),
+        persistent: document.getElementById("f-persistent").checked,
+      };
+
+      if (!payload.name) return showCreateError('Give it an identifier first.');
+      if (!payload.host_port) return showCreateError('Pick a host port.');
+
+      const btn = document.getElementById('submit-db-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+
+      try {
+        const res = await api('/api/databases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        showCreateSuccess(
+          `Created userdb_${payload.name} (${selectedEngine}) on port ${payload.host_port}. ` +
+          (res.ready ? 'It is up and responding.' : (res.warning || ''))
+        );
+        if (res.tables && res.tables.length) {
+          document.getElementById('result-block').innerHTML = res.tables.map(t =>
+            `<div class="${t.ok ? 'ok' : 'bad'}">${t.ok ? '✓' : '✗'} ${t.table}${t.ok ? '' : ' — ' + t.detail}</div>`
+          ).join('');
+        }
+        containerListKey = '';
+        refreshContainers();
+      } catch (e) {
+        showCreateError(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create database';
+      }
+    });
+
+    function scheduleResizeRedraw() {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        drawSpark(document.getElementById('cpu-chart'), cpuHistory, '#4FC3D9');
+        drawSpark(document.getElementById('mem-chart'), memHistory, '#A684FF');
+      });
+    }
+
+    /* ---------------- Boot ---------------- */
+    loadProfile();
+    refreshContainers();
+    refreshHostStats();
+    hostStatsTimer = setInterval(refreshHostStats, 3000);
+    containerRefreshTimer = setInterval(refreshContainers, 10000);
+    statsRefreshTimer = setInterval(refreshOpenStats, 1000);
+    window.addEventListener('resize', scheduleResizeRedraw);
+  </script>
+</body>
+
+</html>

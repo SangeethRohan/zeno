@@ -1,0 +1,15 @@
+# Add this service into your existing docker-compose.yml,
+# under the `services:` block (alongside postgres, mysql, etc).
+
+  dashboard:
+    build: ./container-dashboard/backend
+    container_name: dev_dashboard
+    restart: always
+    ports:
+      - "9090:9090"
+    environment:
+      # Optional basic-auth — leave unset to disable auth entirely.
+      DASHBOARD_USER: admin
+      DASHBOARD_PASS: admin
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
