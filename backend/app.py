@@ -24,6 +24,19 @@ OPEN_LINKS = {
     "dev_portainer": 9000,
 }
 
+WEB_UI_IMAGES = {
+    "dvwa",
+    "web-dvwa",
+    "juice-shop",
+    "webgoat",
+    "mutillidae",
+    "nginx",
+    "apache",
+    "httpd",
+    "php",
+    "wordpress",
+}
+
 # Static grouping for the original compose-defined containers.
 GROUPS = {
     "dev_db_postgreSQL": "Databases",
@@ -78,36 +91,98 @@ def port_in_use(port: int) -> bool:
     finally:
         s.close()
 
-
 def serialize(container):
     container.reload()
     attrs = container.attrs
+
+    # -------------------------
+    # PORTS (safe format)
+    # -------------------------
     ports = []
-    for cport, bindings in (attrs.get("NetworkSettings", {}).get("Ports") or {}).items():
+    network_ports = (attrs.get("NetworkSettings", {}).get("Ports") or {})
+
+    for cport, bindings in network_ports.items():
         if bindings:
             for b in bindings:
-                ports.append(f'{b.get("HostPort")}->{cport}')
+                host = b.get("HostPort")
+                if host:
+                    ports.append(f"{host}->{cport}")
+
+    # -------------------------
+    # BASIC METADATA
+    # -------------------------
     name = container.name
     labels = attrs.get("Config", {}).get("Labels") or {}
+
     is_user_db = labels.get(LABEL_KIND) == USER_DB_LABEL_VALUE
+
     group = "My Databases" if is_user_db else GROUPS.get(name, "Other")
-    # default static mapping first
-    open_port = OPEN_LINKS.get(name)
 
-    # fallback: detect from docker port bindings
-    if open_port is None:
-        network_ports = attrs.get("NetworkSettings", {}).get("Ports") or {}
+    # -------------------------
+    # WEB UI DETECTION (IMPORTANT FIX)
+    # -------------------------
+    image = (attrs.get("Config", {}).get("Image") or "").lower()
 
-        for container_port, bindings in network_ports.items():
-            if bindings:
-                host_port = bindings[0].get("HostPort")
-                if host_port:
-                    open_port = int(host_port)
-                    break
+    WEB_UI_IMAGES = {
+        "dvwa",
+        "web-dvwa",
+        "juice-shop",
+        "webgoat",
+        "mutillidae",
+        "nginx",
+        "apache",
+        "httpd",
+        "wordpress",
+        "php",
+    }
+
+    image = (attrs.get("Config", {}).get("Image") or "").lower()
+    name = container.name.lower()
+
+    WEB_UI_KEYWORDS = {
+        "dvwa",
+        "webgoat",
+        "juice",
+        "mutillidae",
+        "nowasp",
+        "bwa",
+        "nginx",
+        "apache",
+        "httpd",
+        "wordpress",
+    }
+
+    is_web_ui = any(
+        kw in image or kw in name
+        for kw in WEB_UI_KEYWORDS
+    )
+
+    # -------------------------
+    # OPEN PORT LOGIC (FIXED)
+    # -------------------------
+    open_port = None
+
+    # ONLY web UIs can have open button
+    if is_web_ui:
+        # 1. try static mapping
+        open_port = OPEN_LINKS.get(name)
+
+        # 2. fallback to docker port mapping
+        if open_port is None:
+            for cport, bindings in network_ports.items():
+                if bindings:
+                    host = bindings[0].get("HostPort")
+                    if host:
+                        open_port = int(host)
+                        break
+
+    # -------------------------
+    # RETURN
+    # -------------------------
     return {
         "id": container.short_id,
         "name": name,
-        "image": (attrs.get("Config", {}).get("Image") or ""),
+        "image": attrs.get("Config", {}).get("Image") or "",
         "status": container.status,
         "health": (attrs.get("State", {}).get("Health", {}) or {}).get("Status"),
         "started_at": attrs.get("State", {}).get("StartedAt"),
