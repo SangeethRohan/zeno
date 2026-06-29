@@ -91,6 +91,19 @@ def serialize(container):
     labels = attrs.get("Config", {}).get("Labels") or {}
     is_user_db = labels.get(LABEL_KIND) == USER_DB_LABEL_VALUE
     group = "My Databases" if is_user_db else GROUPS.get(name, "Other")
+    # default static mapping first
+    open_port = OPEN_LINKS.get(name)
+
+    # fallback: detect from docker port bindings
+    if open_port is None:
+        network_ports = attrs.get("NetworkSettings", {}).get("Ports") or {}
+
+        for container_port, bindings in network_ports.items():
+            if bindings:
+                host_port = bindings[0].get("HostPort")
+                if host_port:
+                    open_port = int(host_port)
+                    break
     return {
         "id": container.short_id,
         "name": name,
@@ -100,7 +113,7 @@ def serialize(container):
         "started_at": attrs.get("State", {}).get("StartedAt"),
         "ports": ports,
         "group": group,
-        "open_port": OPEN_LINKS.get(name),
+        "open_port": open_port,
         "is_user_db": is_user_db,
         "engine": labels.get(LABEL_ENGINE),
         "persistent": labels.get("stackcontrol.persistent", "true") == "true",
