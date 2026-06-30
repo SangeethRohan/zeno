@@ -81,6 +81,7 @@ function alertsVisibleOnDashboard(alerts) {
 const VIEW_TITLES = {
   dashboard: ["Dashboard", "local dev environment"],
   host: ["Host", "system information and resources"],
+  create: ["Create", "spin up databases, servers, and web services"],
   timeline: ["Timeline", "what happened in the last 24 hours"],
   logs: ["Central Logs", "your activity and container logs"],
   alerts: ["Alerts", "container CPU, memory, crash loop, and port alerts"],
@@ -93,6 +94,7 @@ const VIEW_TITLES = {
 
 const terminalHistory = new Map();
 const terminalCwd = new Map();
+const terminalShell = new Map();
 let terminalContainer = null;
 let selectedWebType = "nginx";
 let groupLayout = null;
@@ -114,6 +116,7 @@ document.querySelectorAll(".nav-item").forEach(item => {
       refreshHostDetails();
       renderHostCharts();
     }
+    if (view === "create") applyCreateFeatureCards();
     if (view === "timeline") loadTimeline();
     if (view === "logs") loadCentralLogsPage();
     if (view === "alerts") loadAlertsPage();
@@ -185,16 +188,148 @@ async function loadProfile() {
 }
 
 function applyFeatureNav(features) {
-  const map = {
-    create_database: "nav-create-db",
-    create_ubuntu: "nav-create-ubuntu",
-    create_web_server: "nav-create-web"
+  const createNav = $("nav-create");
+  const hasAnyCreate = Boolean(
+    features.create_database || features.create_ubuntu || features.create_web_server
+  );
+  if (createNav) createNav.hidden = !hasAnyCreate;
+
+  const cardMap = {
+    create_database: "create-card-database",
+    create_ubuntu: "create-card-ubuntu",
+    create_web_server: "create-card-web"
   };
-  Object.entries(map).forEach(([key, id]) => {
+  Object.entries(cardMap).forEach(([key, id]) => {
     const el = $(id);
     if (el) el.hidden = !features[key];
   });
 }
+
+function navigateToView(view) {
+  const navItem = document.querySelector(`.nav-item[data-view="${view}"]`);
+  if (navItem) {
+    navItem.click();
+    return;
+  }
+  document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+  $(`view-${view}`)?.classList.add("active");
+  const [title, sub] = VIEW_TITLES[view] || ["Zeno", ""];
+  $("page-title").textContent = title;
+  $("page-sub").textContent = sub;
+}
+
+function applyCreateFeatureCards() {
+  const features = currentUser.features || {};
+  applyFeatureNav(features);
+}
+
+const CREATE_TYPE_LABELS = {
+  database: "Database containers",
+  ubuntu: "Ubuntu servers",
+  web: "Web servers"
+};
+
+function filterContainersByCreateType(type) {
+  return (containers || []).filter(c => {
+    if (type === "database") return c.is_user_db;
+    if (type === "ubuntu") return c.is_user_server;
+    if (type === "web") return c.is_user_web;
+    return false;
+  });
+}
+
+function renderCreateAvailableList(type) {
+  const panel = $("create-available-panel");
+  const list = $("create-available-list");
+  const title = $("create-available-title");
+  if (!panel || !list) return;
+
+  const matches = filterContainersByCreateType(type);
+  if (title) title.textContent = CREATE_TYPE_LABELS[type] || "Available containers";
+
+  if (!matches.length) {
+    list.innerHTML = '<div class="empty">No containers found for this template.</div>';
+  } else {
+    list.innerHTML = matches.map(c => `
+      <div class="create-available-item">
+        <div>
+          <div>${escapeHtml(c.name)}</div>
+          <div class="create-available-meta">${escapeHtml(c.image || "")}${c.engine ? ` · ${escapeHtml(c.engine)}` : ""}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="status-dot ${escapeHtml(statusClass(c))}"></span>
+          <span>${escapeHtml(c.status)}</span>
+        </div>
+      </div>
+    `).join("");
+  }
+  panel.hidden = false;
+}
+
+document.querySelectorAll("[data-create-action]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const type = btn.dataset.createType;
+    const action = btn.dataset.createAction;
+    if (!type) return;
+    if (action === "show") {
+      renderCreateAvailableList(type);
+      $("create-available-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      return;
+    }
+    if (action === "create") {
+      const viewMap = {
+        database: "create-db",
+        ubuntu: "create-ubuntu",
+        web: "create-web"
+      };
+      navigateToView(viewMap[type]);
+    }
+  });
+});
+
+$("create-available-close")?.addEventListener("click", () => {
+  const panel = $("create-available-panel");
+  if (panel) panel.hidden = true;
+});
+
+/* ---------------- Confirm dialog ---------------- */
+
+let confirmResolver = null;
+
+function showConfirm(message, options = {}) {
+  const modal = $("confirm-modal");
+  const msgEl = $("confirm-message");
+  const okBtn = $("confirm-ok");
+  const titleEl = $("confirm-title");
+  if (!modal || !msgEl || !okBtn) {
+    return Promise.resolve(window.confirm(message));
+  }
+  if (confirmResolver) {
+    confirmResolver(false);
+    confirmResolver = null;
+  }
+  if (titleEl) titleEl.textContent = options.title || "Confirm";
+  msgEl.textContent = message;
+  okBtn.textContent = options.confirmLabel || "Delete";
+  modal.hidden = false;
+  return new Promise(resolve => {
+    confirmResolver = resolve;
+  });
+}
+
+function closeConfirm(result) {
+  const modal = $("confirm-modal");
+  if (modal) modal.hidden = true;
+  if (confirmResolver) {
+    confirmResolver(result);
+    confirmResolver = null;
+  }
+}
+
+$("confirm-cancel")?.addEventListener("click", () => closeConfirm(false));
+$("confirm-backdrop")?.addEventListener("click", () => closeConfirm(false));
+$("confirm-ok")?.addEventListener("click", () => closeConfirm(true));
 
 /* ---------------- Dashboard ---------------- */
 
@@ -831,7 +966,10 @@ function wireGroupsEditorEvents() {
     btn.addEventListener("click", async e => {
       e.stopPropagation();
       const gid = btn.dataset.delGroup;
-      if (!confirm("Delete this group? Containers will move to another group.")) return;
+      if (!await showConfirm("Delete this group? Containers will move to another group.", {
+        title: "Delete group",
+        confirmLabel: "Delete"
+      })) return;
       try {
         const res = await api(`${API_PREFIX}/groups/${encodeURIComponent(gid)}`, { method: "DELETE" });
         groupsEditorData.layout = res.layout;
@@ -1183,6 +1321,11 @@ function ensureTerminalHistory(name) {
 function updateTerminalPrompt() {
   const el = $("terminal-prompt");
   if (!el || !terminalContainer) return;
+  const shell = terminalShell.get(terminalContainer);
+  if (shell) {
+    el.textContent = shell;
+    return;
+  }
   const cwd = terminalCwd.get(terminalContainer) || "/";
   el.textContent = `${cwd} $`;
 }
@@ -1221,6 +1364,7 @@ window.openTerminal = function openTerminal(name) {
 
 function closeTerminal() {
   $("terminal-modal").hidden = true;
+  if (terminalContainer) terminalShell.delete(terminalContainer);
   terminalContainer = null;
 }
 
@@ -1234,7 +1378,8 @@ $("terminal-form")?.addEventListener("submit", async e => {
   if (!cmd || !terminalContainer) return;
 
   const history = ensureTerminalHistory(terminalContainer);
-  history.push({ type: "in", text: `$ ${cmd}` });
+  const prompt = terminalShell.get(terminalContainer) || `${terminalCwd.get(terminalContainer) || "/"} $`;
+  history.push({ type: "in", text: `${prompt} ${cmd}` });
   input.value = "";
   renderTerminalScreen();
 
@@ -1248,6 +1393,11 @@ $("terminal-form")?.addEventListener("submit", async e => {
       })
     });
     if (res.cwd) terminalCwd.set(terminalContainer, res.cwd);
+    if (res.shell) {
+      terminalShell.set(terminalContainer, res.prompt || `${res.shell}>`);
+    } else {
+      terminalShell.delete(terminalContainer);
+    }
     updateTerminalPrompt();
     const out = res.output || "(no output)";
     if (res.exit_code !== 0) {
@@ -1263,6 +1413,10 @@ $("terminal-form")?.addEventListener("submit", async e => {
 });
 
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("confirm-modal")?.hidden) {
+    closeConfirm(false);
+    return;
+  }
   if (e.key === "Escape" && !$("terminal-modal")?.hidden) closeTerminal();
 });
 
@@ -1353,7 +1507,10 @@ window.act = async function act(name, action) {
 };
 
 window.deleteContainer = async function deleteContainer(name) {
-  if (!confirm(`Delete ${name}?`)) return;
+  if (!await showConfirm(`Delete ${name}? This cannot be undone.`, {
+    title: "Delete container",
+    confirmLabel: "Delete"
+  })) return;
   try {
     await api(`${API_PREFIX}/containers/${name}`, { method: "DELETE" });
     openRows.delete(name);
@@ -2112,14 +2269,14 @@ $("alert-threshold-save")?.addEventListener("click", async () => {
     if (msg) {
       msg.textContent = "Thresholds saved.";
       msg.hidden = false;
-      msg.className = "tier-save-msg ok";
+      msg.className = "threshold-save-msg ok";
     }
     loadAlertsPage();
   } catch (e) {
     if (msg) {
       msg.textContent = e.message;
       msg.hidden = false;
-      msg.className = "tier-save-msg bad";
+      msg.className = "threshold-save-msg bad";
     }
   }
 });

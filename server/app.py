@@ -99,12 +99,16 @@ USER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}$")
 CORE_APP_NAMES = {"zeno_dashboard", "zeno_mongo"}
 
 _terminal_cwd = {}
+_terminal_shells = {}
+INTERACTIVE_SHELL_PROGRAMS = {
+    "mongosh", "mongo", "mysql", "mariadb", "psql", "redis-cli", "bash", "sh",
+}
 _container_status_cache = {}
 _cpu_high_streak = {}
 _mem_high_streak = {}
 _restart_streak = {}
-_alert_thresholds_cache = None
-_alert_thresholds_cache_at = 0
+_user_thresholds_cache = {}
+_user_thresholds_cache_at = 0
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() != "false"
 MONITOR_INTERVAL_SEC = int(os.environ.get("MONITOR_INTERVAL_SEC", "60"))
 
@@ -276,6 +280,223 @@ def _validate_dir_in_container(container, path):
     )
     return result.exit_code == 0
 
+
+def _close_terminal_shell(session_key):
+    _terminal_shells.pop(session_key, None)
+
+
+def _decode_exec_output(result):
+    stdout = (result.output[0] or b"").decode("utf-8", errors="replace")
+    stderr = (result.output[1] or b"").decode("utf-8", errors="replace")
+    return stdout + stderr
+
+
+MONGO_USE_RE = re.compile(r"^\s*use\s+(\S+)\s*;?\s*$", re.IGNORECASE)
+
+
+def _mongo_env_credentials(container):
+    env_list = (container.attrs.get("Config", {}) or {}).get("Env") or []
+    env = {}
+    for item in env_list:
+        if "=" in item:
+            key, value = item.split("=", 1)
+            env[key] = value
+    user = env.get("MONGO_INITDB_ROOT_USERNAME")
+    password = env.get("MONGO_INITDB_ROOT_PASSWORD")
+    if user and password:
+        return ["-u", user, "-p", password, "--authenticationDatabase", "admin"]
+    return []
+
+
+def _mongo_prompt(shell):
+    return f"{shell.get('mongo_db', 'test')}>"
+
+
+def _clean_mongosh_output(output):
+    cleaned = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if re.match(r"^[a-zA-Z0-9_-]+>\s*$", stripped):
+            continue
+        if stripped.startswith("test>") or stripped.startswith("admin>"):
+            stripped = re.sub(r"^[a-zA-Z0-9_-]+>\s*", "", line).rstrip()
+            if not stripped:
+                continue
+            cleaned.append(stripped)
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def _shell_prompt(shell):
+    program = shell.get("program")
+    if program in ("mongosh", "mongo"):
+        return _mongo_prompt(shell)
+    if program == "redis-cli":
+        return "127.0.0.1:6379>"
+    if program in ("mysql", "mariadb"):
+        return "mysql>"
+    if program == "psql":
+        return "psql>"
+    return f"{program}>"
+
+
+def _build_virtual_shell_cmd(shell, command):
+    program = shell.get("program")
+    if program in ("mongosh", "mongo"):
+        args = shell.get("args", [])
+        mongo_db = shell.get("mongo_db", "test")
+        command = command.rstrip(";")
+        if MONGO_USE_RE.match(command):
+            lines = [command]
+        else:
+            lines = [f"use {mongo_db}", command]
+        script_body = "\n".join(lines)
+        mongosh_parts = [program, "--quiet", *args]
+        mongosh_cmd = " ".join(shlex.quote(part) for part in mongosh_parts)
+        script = f"printf '%s\\n' {shlex.quote(script_body)} | {mongosh_cmd}"
+        return ["/bin/sh", "-c", script]
+    if program in ("mysql", "mariadb"):
+        args = shell.get("args", [])
+        client = " ".join(shlex.quote(part) for part in [program, *args])
+        script = f"printf '%s\\n' {shlex.quote(command)} | {client}"
+        return ["/bin/sh", "-c", script]
+    if program == "psql":
+        return ["psql", "-c", command]
+    if program == "redis-cli":
+        return ["redis-cli", *shlex.split(command)]
+    if program in ("bash", "sh"):
+        return ["/bin/sh", "-c", command]
+    return [program, *shlex.split(command)]
+
+
+def _virtual_shell_banner(program, shell):
+    if program in ("mongosh", "mongo"):
+        db_name = shell.get("mongo_db", "test")
+        auth_note = ""
+        if shell.get("args"):
+            auth_note = " (authenticated)"
+        return (
+            f"Current Mongosh Log ID:\t{uuid.uuid4().hex[:24]}\n"
+            f"Connecting to:\t\tmongodb://127.0.0.1:27017/?directConnection=true\n"
+            f"Using Mongosh:\t\tvirtual session{auth_note}\n\n"
+            f"For mongosh info see: https://www.mongodb.com/docs/mongodb-shell/\n\n"
+            f"{db_name}>"
+        )
+    return f"Connected to {program}. Type commands below (type exit to leave).\n"
+
+
+def _is_interactive_shell_command(command):
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False, None
+    if not parts:
+        return False, None
+    program = posixpath.basename(parts[0])
+    if program in INTERACTIVE_SHELL_PROGRAMS:
+        return True, parts
+    return False, None
+
+
+def _is_shell_exit_command(command):
+    cmd = command.strip().lower()
+    return cmd in {"exit", "quit", "\\q", "logout"}
+
+
+def _exec_in_terminal_shell(container, session_key, command, cwd):
+    shell = _terminal_shells.get(session_key)
+    if not shell:
+        return None
+    program = shell.get("program")
+    if _is_shell_exit_command(command):
+        _close_terminal_shell(session_key)
+        return {
+            "exit_code": 0,
+            "output": "",
+            "shell": None,
+            "prompt": None,
+        }
+    if program in ("mongosh", "mongo"):
+        match = MONGO_USE_RE.match(command)
+        if match:
+            shell["mongo_db"] = match.group(1)
+    try:
+        exec_cmd = _build_virtual_shell_cmd(shell, command)
+        result = container.exec_run(exec_cmd, workdir=cwd, demux=True)
+        output = _decode_exec_output(result)
+        if program in ("mongosh", "mongo"):
+            output = _clean_mongosh_output(output)
+        prompt = _shell_prompt(shell)
+        shell["prompt"] = prompt
+        return {
+            "exit_code": result.exit_code,
+            "output": output or "(no output)",
+            "shell": program,
+            "prompt": prompt,
+        }
+    except APIError as exc:
+        return {
+            "exit_code": 1,
+            "output": str(exc) + "\n",
+            "shell": program,
+            "prompt": shell.get("prompt") or _shell_prompt(shell),
+        }
+
+
+def _start_terminal_shell(container, session_key, parts, cwd):
+    program = posixpath.basename(parts[0])
+    try:
+        check = container.exec_run(
+            ["sh", "-c", f"command -v {shlex.quote(program)} >/dev/null 2>&1"],
+            workdir=cwd,
+            demux=True,
+        )
+        if check.exit_code != 0:
+            return {
+                "exit_code": 127,
+                "output": f"/bin/sh: {program}: not found\n",
+                "shell": None,
+                "prompt": None,
+            }
+    except APIError as exc:
+        return {
+            "exit_code": 1,
+            "output": str(exc) + "\n",
+            "shell": None,
+            "prompt": None,
+        }
+
+    shell_args = parts[1:]
+    if program in ("mongosh", "mongo"):
+        try:
+            container.reload()
+        except NotFound:
+            pass
+        if not shell_args:
+            shell_args = _mongo_env_credentials(container)
+
+    mongo_db = "test"
+    if program in ("mongosh", "mongo") and shell_args:
+        mongo_db = "admin"
+
+    shell = {
+        "program": program,
+        "args": shell_args,
+        "mongo_db": mongo_db,
+        "virtual": True,
+    }
+    shell["prompt"] = _shell_prompt(shell)
+    _terminal_shells[session_key] = shell
+    banner = _virtual_shell_banner(program, shell)
+    return {
+        "exit_code": 0,
+        "output": banner or "",
+        "shell": program,
+        "prompt": shell["prompt"],
+    }
+
+
 def serialize(container):
     container.reload()
     attrs = container.attrs
@@ -387,6 +608,8 @@ def serialize(container):
         "is_core_app": is_core_app,
         "open_port": open_port,
         "is_user_db": is_user_db,
+        "is_user_server": is_user_server,
+        "is_user_web": is_user_web,
         "engine": labels.get(LABEL_ENGINE),
         "persistent": labels.get("stackcontrol.persistent", "true") == "true",
         "created_by": labels.get("zeno.created_by"),
@@ -1091,43 +1314,53 @@ def _port_reachable(host_port):
         return False
 
 
-def _get_alert_thresholds():
-    global _alert_thresholds_cache, _alert_thresholds_cache_at
+def _get_user_alert_thresholds(username):
+    global _user_thresholds_cache, _user_thresholds_cache_at
     now = time.time()
-    if _alert_thresholds_cache and now - _alert_thresholds_cache_at < 30:
-        return _alert_thresholds_cache
+    cached = _user_thresholds_cache.get(username)
+    if cached and now - _user_thresholds_cache_at < 30:
+        return cached
     try:
-        _alert_thresholds_cache = zeno_db.get_alert_thresholds()
+        thresholds = zeno_db.get_user_alert_thresholds(username)
     except Exception:
-        _alert_thresholds_cache = dict(zeno_db.DEFAULT_ALERT_THRESHOLDS)
-    _alert_thresholds_cache_at = now
-    return _alert_thresholds_cache
+        thresholds = dict(zeno_db.DEFAULT_ALERT_THRESHOLDS)
+    _user_thresholds_cache[username] = thresholds
+    _user_thresholds_cache_at = now
+    return thresholds
 
 
-def _check_container_alerts(name, raw_stats, container):
-    thresholds = _get_alert_thresholds()
+def _streak_key(username, container_name):
+    return (username, container_name)
+
+
+def _check_container_alerts_for_user(username, name, raw_stats, container):
+    thresholds = _get_user_alert_thresholds(username)
     cpu_limit = thresholds["cpu_percent"]
     mem_limit_pct = thresholds["mem_percent"]
     resolve_cpu_below = max(cpu_limit - 10, 1)
     resolve_mem_below = max(mem_limit_pct - 10, 1)
+    streak_cpu = _streak_key(username, name)
+    streak_mem = _streak_key(username, name)
+    streak_restart = _streak_key(username, name)
 
     status = container.status
     if status == "restarting":
-        _restart_streak[name] = _restart_streak.get(name, 0) + 1
-        if _restart_streak[name] >= 2:
+        _restart_streak[streak_restart] = _restart_streak.get(streak_restart, 0) + 1
+        if _restart_streak[streak_restart] >= 2:
             zeno_db.insert_alert(
                 "crash_loop",
                 name,
                 f"Container {name} is in a crash loop (restarting)",
                 severity="critical",
+                username=username,
             )
     else:
-        if _restart_streak.pop(name, 0) >= 2:
-            zeno_db.resolve_alerts("crash_loop", name)
+        if _restart_streak.pop(streak_restart, 0) >= 2:
+            zeno_db.resolve_alerts("crash_loop", name, username=username)
 
     if not raw_stats:
-        _cpu_high_streak.pop(name, None)
-        _mem_high_streak.pop(name, None)
+        _cpu_high_streak.pop(streak_cpu, None)
+        _mem_high_streak.pop(streak_mem, None)
         return
 
     cpu = raw_stats["cpu"]
@@ -1136,8 +1369,8 @@ def _check_container_alerts(name, raw_stats, container):
         mem_pct = (raw_stats["mem_used_mb"] / raw_stats["mem_limit_mb"]) * 100
 
     if cpu > cpu_limit:
-        _cpu_high_streak[name] = _cpu_high_streak.get(name, 0) + 1
-        if _cpu_high_streak[name] >= 2:
+        _cpu_high_streak[streak_cpu] = _cpu_high_streak.get(streak_cpu, 0) + 1
+        if _cpu_high_streak[streak_cpu] >= 2:
             zeno_db.insert_alert(
                 "cpu_high",
                 name,
@@ -1145,14 +1378,15 @@ def _check_container_alerts(name, raw_stats, container):
                 severity="warning",
                 cpu_percent=round(cpu, 2),
                 mem_percent=round(mem_pct, 2),
+                username=username,
             )
     elif cpu < resolve_cpu_below:
-        _cpu_high_streak.pop(name, None)
-        zeno_db.resolve_alerts("cpu_high", name)
+        _cpu_high_streak.pop(streak_cpu, None)
+        zeno_db.resolve_alerts("cpu_high", name, username=username)
 
     if mem_pct > mem_limit_pct:
-        _mem_high_streak[name] = _mem_high_streak.get(name, 0) + 1
-        if _mem_high_streak[name] >= 2:
+        _mem_high_streak[streak_mem] = _mem_high_streak.get(streak_mem, 0) + 1
+        if _mem_high_streak[streak_mem] >= 2:
             zeno_db.insert_alert(
                 "mem_high",
                 name,
@@ -1160,10 +1394,11 @@ def _check_container_alerts(name, raw_stats, container):
                 severity="warning",
                 cpu_percent=round(cpu, 2),
                 mem_percent=round(mem_pct, 2),
+                username=username,
             )
     elif mem_pct < resolve_mem_below:
-        _mem_high_streak.pop(name, None)
-        zeno_db.resolve_alerts("mem_high", name)
+        _mem_high_streak.pop(streak_mem, None)
+        zeno_db.resolve_alerts("mem_high", name, username=username)
 
     failed_ports = []
     for host_port in _published_host_ports(container):
@@ -1177,13 +1412,25 @@ def _check_container_alerts(name, raw_stats, container):
             severity="critical",
             cpu_percent=round(cpu, 2),
             mem_percent=round(mem_pct, 2),
+            username=username,
         )
     else:
-        zeno_db.resolve_alerts("port_failure", name)
+        zeno_db.resolve_alerts("port_failure", name, username=username)
 
 
-def _check_host_thresholds(cpu, mem_percent):
-    thresholds = _get_alert_thresholds()
+def _check_container_alerts(name, raw_stats, container):
+    try:
+        usernames = zeno_db.list_usernames()
+    except Exception:
+        usernames = []
+    if not usernames:
+        usernames = ["admin"]
+    for username in usernames:
+        _check_container_alerts_for_user(username, name, raw_stats, container)
+
+
+def _check_host_thresholds_for_user(username, cpu, mem_percent):
+    thresholds = _get_user_alert_thresholds(username)
     cpu_limit = thresholds["cpu_percent"]
     mem_limit_pct = thresholds["mem_percent"]
     host_name = zeno_db.HOST_METRICS_CONTAINER
@@ -1196,9 +1443,10 @@ def _check_host_thresholds(cpu, mem_percent):
             severity="warning",
             cpu_percent=round(cpu, 2),
             mem_percent=round(mem_percent, 2),
+            username=username,
         )
     else:
-        zeno_db.resolve_alerts("cpu_high", host_name)
+        zeno_db.resolve_alerts("cpu_high", host_name, username=username)
 
     if mem_percent > mem_limit_pct:
         zeno_db.insert_alert(
@@ -1208,9 +1456,21 @@ def _check_host_thresholds(cpu, mem_percent):
             severity="warning",
             cpu_percent=round(cpu, 2),
             mem_percent=round(mem_percent, 2),
+            username=username,
         )
     else:
-        zeno_db.resolve_alerts("mem_high", host_name)
+        zeno_db.resolve_alerts("mem_high", host_name, username=username)
+
+
+def _check_host_thresholds(cpu, mem_percent):
+    try:
+        usernames = zeno_db.list_usernames()
+    except Exception:
+        usernames = []
+    if not usernames:
+        usernames = ["admin"]
+    for username in usernames:
+        _check_host_thresholds_for_user(username, cpu, mem_percent)
 
 
 def _detect_state_changes():
@@ -1351,7 +1611,7 @@ def timeline_api():
     hours = request.args.get("hours", 24)
     limit = request.args.get("limit", 200)
     try:
-        events = zeno_db.list_timeline(hours=hours, limit=limit)
+        events = zeno_db.list_timeline(hours=hours, limit=limit, username=current_username())
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid query parameters"}), 400
     return jsonify({"hours": int(hours), "events": events})
@@ -1363,17 +1623,19 @@ def alerts_api():
     hours = request.args.get("hours", 24)
     active_only = request.args.get("active_only", "false").lower() == "true"
     containers_only = request.args.get("containers_only", "true").lower() == "true"
+    username = current_username()
     try:
         alerts = zeno_db.list_alerts(
             hours=hours,
             active_only=active_only,
             containers_only=containers_only,
+            username=username,
         )
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid query parameters"}), 400
     return jsonify({
         "hours": int(hours),
-        "thresholds": _get_alert_thresholds(),
+        "thresholds": _get_user_alert_thresholds(username),
         "alerts": alerts,
     })
 
@@ -1381,7 +1643,8 @@ def alerts_api():
 @app.route(f"{API_PREFIX}/alerts/thresholds", methods=["GET"])
 @requires_auth
 def get_alert_thresholds_api():
-    return jsonify({"thresholds": _get_alert_thresholds()})
+    username = current_username()
+    return jsonify({"thresholds": _get_user_alert_thresholds(username)})
 
 
 @app.route(f"{API_PREFIX}/alerts/thresholds", methods=["PUT"])
@@ -1390,16 +1653,18 @@ def put_alert_thresholds_api():
     body = request.get_json(force=True, silent=True) or {}
     cpu = body.get("cpu_percent")
     mem = body.get("mem_percent")
+    username = current_username()
     try:
-        updated = zeno_db.set_alert_thresholds(
+        updated = zeno_db.set_user_alert_thresholds(
+            username,
             cpu_percent=cpu if cpu is not None else None,
             mem_percent=mem if mem is not None else None,
         )
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid threshold values (1–100)."}), 400
-    global _alert_thresholds_cache, _alert_thresholds_cache_at
-    _alert_thresholds_cache = updated
-    _alert_thresholds_cache_at = time.time()
+    global _user_thresholds_cache, _user_thresholds_cache_at
+    _user_thresholds_cache[username] = updated
+    _user_thresholds_cache_at = time.time()
     return jsonify({"thresholds": updated})
 
 
@@ -1498,6 +1763,10 @@ def container_exec(name):
         })
 
     if cmd_lower == "cd" or cmd_lower.startswith("cd "):
+        if session_key in _terminal_shells:
+            return jsonify({
+                "error": "Cannot change directory while inside an interactive shell. Type exit first."
+            }), 400
         new_cwd = _resolve_cd(cwd, command)
         if not _validate_dir_in_container(c, new_cwd):
             target = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) > 1 else ""
@@ -1508,6 +1777,8 @@ def container_exec(name):
                 "exit_code": 1,
                 "output": msg,
                 "cwd": cwd,
+                "shell": None,
+                "prompt": "$",
             })
         _terminal_cwd[session_key] = new_cwd
         return jsonify({
@@ -1516,6 +1787,39 @@ def container_exec(name):
             "exit_code": 0,
             "output": "",
             "cwd": new_cwd,
+            "shell": None,
+            "prompt": "$",
+        })
+
+    if session_key in _terminal_shells:
+        shell_result = _exec_in_terminal_shell(c, session_key, command, cwd)
+        if shell_result is not None:
+            log_container_activity("exec", c, details=command[:200])
+            return jsonify({
+                "name": name,
+                "command": command,
+                "exit_code": shell_result["exit_code"],
+                "output": shell_result["output"] or "(no output)",
+                "cwd": cwd,
+                "shell": shell_result.get("shell"),
+                "prompt": shell_result.get("prompt") or "$",
+            })
+
+    is_interactive, parts = _is_interactive_shell_command(command)
+    if is_interactive:
+        try:
+            shell_result = _start_terminal_shell(c, session_key, parts, cwd)
+        except Exception as exc:
+            return jsonify({"error": f"Failed to start shell: {exc}"}), 500
+        log_container_activity("exec", c, details=command[:200])
+        return jsonify({
+            "name": name,
+            "command": command,
+            "exit_code": shell_result["exit_code"],
+            "output": shell_result["output"] or "(no output)",
+            "cwd": cwd,
+            "shell": shell_result.get("shell"),
+            "prompt": shell_result.get("prompt") or "$",
         })
 
     try:
@@ -1537,6 +1841,8 @@ def container_exec(name):
             "stderr": stderr,
             "output": output or "(no output)",
             "cwd": cwd,
+            "shell": None,
+            "prompt": "$",
         })
     except APIError as e:
         return jsonify({"error": str(e)}), 500

@@ -30,6 +30,45 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;");
 }
 
+let confirmResolver = null;
+
+function showConfirm(message, options = {}) {
+  const modal = document.getElementById("confirm-modal");
+  const msgEl = document.getElementById("confirm-message");
+  const okBtn = document.getElementById("confirm-ok");
+  const titleEl = document.getElementById("confirm-title");
+  if (!modal || !msgEl || !okBtn) return Promise.resolve(window.confirm(message));
+  if (confirmResolver) {
+    confirmResolver(false);
+    confirmResolver = null;
+  }
+  if (titleEl) titleEl.textContent = options.title || "Confirm";
+  msgEl.textContent = message;
+  okBtn.textContent = options.confirmLabel || "Confirm";
+  modal.hidden = false;
+  return new Promise(resolve => {
+    confirmResolver = resolve;
+  });
+}
+
+function closeConfirm(result) {
+  const modal = document.getElementById("confirm-modal");
+  if (modal) modal.hidden = true;
+  if (confirmResolver) {
+    confirmResolver(result);
+    confirmResolver = null;
+  }
+}
+
+document.getElementById("confirm-cancel")?.addEventListener("click", () => closeConfirm(false));
+document.getElementById("confirm-backdrop")?.addEventListener("click", () => closeConfirm(false));
+document.getElementById("confirm-ok")?.addEventListener("click", () => closeConfirm(true));
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !document.getElementById("confirm-modal")?.hidden) {
+    closeConfirm(false);
+  }
+});
+
 function fmtTs(iso) {
   if (!iso) return "—";
   try {
@@ -280,7 +319,10 @@ document.getElementById("bulk-tier-btn")?.addEventListener("click", async () => 
     return u && !u.is_primary;
   });
   if (!usernames.length) return;
-  if (!confirm(`Set tier to ${tier} for ${usernames.length} user(s)?`)) return;
+  if (!await showConfirm(`Set tier to ${tier} for ${usernames.length} user(s)?`, {
+    title: "Change tier",
+    confirmLabel: "Apply"
+  })) return;
   try {
     const res = await api("/api/v1/users/bulk", {
       method: "POST",
@@ -302,7 +344,10 @@ document.getElementById("bulk-delete-btn")?.addEventListener("click", async () =
     return u && !u.is_primary;
   });
   if (!usernames.length) return;
-  if (!confirm(`Delete ${usernames.length} user(s)? This cannot be undone.`)) return;
+  if (!await showConfirm(`Delete ${usernames.length} user(s)? This cannot be undone.`, {
+    title: "Delete users",
+    confirmLabel: "Delete"
+  })) return;
   try {
     const res = await api("/api/v1/users/bulk", {
       method: "POST",

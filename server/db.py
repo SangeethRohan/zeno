@@ -79,6 +79,20 @@ def init_db(admin_user="admin", admin_pass="admin"):
         {"alert_notifications": {"$exists": False}},
         {"$set": {"alert_notifications": dict(DEFAULT_ALERT_NOTIFICATIONS)}},
     )
+    legacy_thresholds = None
+    legacy_doc = db.settings.find_one({"key": "alert_thresholds"})
+    if legacy_doc and isinstance(legacy_doc.get("value"), dict):
+        legacy_thresholds = legacy_doc["value"]
+    default_thresholds = dict(DEFAULT_ALERT_THRESHOLDS)
+    if legacy_thresholds:
+        for key in DEFAULT_ALERT_THRESHOLDS:
+            val = legacy_thresholds.get(key)
+            if isinstance(val, (int, float)):
+                default_thresholds[key] = max(1, min(int(val), 100))
+    db.users.update_many(
+        {"alert_thresholds": {"$exists": False}},
+        {"$set": {"alert_thresholds": default_thresholds}},
+    )
     db.users.update_one(
         {"username": admin_user},
         {"$set": {"is_primary": True, "tier": PRIMARY_ADMIN_TIER}},
@@ -625,39 +639,75 @@ def list_metric_history(container, hours=24):
     return results
 
 
-def find_unresolved_alert(rule, container):
+def find_unresolved_alert(rule, container, username=None):
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=ALERT_DEDUP_MINUTES)
-    return get_db().alerts.find_one({
+    query = {
         "rule": rule,
         "container": container,
         "resolved": False,
         "ts": {"$gte": cutoff},
-    })
+    }
+    if username is not None:
+        query["username"] = username
+    return get_db().alerts.find_one(query)
 
 
-def get_alert_thresholds():
-    doc = get_db().settings.find_one({"key": "alert_thresholds"})
+def _normalize_alert_thresholds(values):
     merged = dict(DEFAULT_ALERT_THRESHOLDS)
-    if doc and isinstance(doc.get("value"), dict):
+    if isinstance(values, dict):
         for key in DEFAULT_ALERT_THRESHOLDS:
-            val = doc["value"].get(key)
+            val = values.get(key)
             if isinstance(val, (int, float)):
                 merged[key] = max(1, min(int(val), 100))
     return merged
 
 
-def set_alert_thresholds(cpu_percent=None, mem_percent=None):
-    current = get_alert_thresholds()
+def get_alert_thresholds():
+    """Legacy global thresholds — kept for migration only."""
+    doc = get_db().settings.find_one({"key": "alert_thresholds"})
+    return _normalize_alert_thresholds(doc.get("value") if doc else None)
+
+
+def get_user_alert_thresholds(username):
+    user = get_db().users.find_one(
+        {"username": username}, {"alert_thresholds": 1}
+    )
+    if user and isinstance(user.get("alert_thresholds"), dict):
+        return _normalize_alert_thresholds(user["alert_thresholds"])
+    return dict(DEFAULT_ALERT_THRESHOLDS)
+
+
+def set_user_alert_thresholds(username, cpu_percent=None, mem_percent=None):
+    if not get_user(username):
+        raise ValueError("User not found")
+    current = get_user_alert_thresholds(username)
     if cpu_percent is not None:
         current["cpu_percent"] = max(1, min(int(cpu_percent), 100))
     if mem_percent is not None:
         current["mem_percent"] = max(1, min(int(mem_percent), 100))
-    get_db().settings.update_one(
-        {"key": "alert_thresholds"},
-        {"$set": {"value": current}},
-        upsert=True,
+    get_db().users.update_one(
+        {"username": username},
+        {"$set": {"alert_thresholds": current}},
     )
     return current
+
+
+def set_alert_thresholds(cpu_percent=None, mem_percent=None):
+    """Legacy global setter — delegates to primary admin user when available."""
+    primary = _primary_admin or "admin"
+    return set_user_alert_thresholds(
+        primary,
+        cpu_percent=cpu_percent,
+        mem_percent=mem_percent,
+    )
+
+
+def list_usernames():
+    return [
+        doc["username"]
+        for doc in get_db().users.find({}, {"username": 1, "_id": 0})
+        if doc.get("username")
+    ]
 
 
 def get_alert_notifications(username):
@@ -694,8 +744,9 @@ def insert_alert(
     severity="warning",
     cpu_percent=None,
     mem_percent=None,
+    username=None,
 ):
-    if find_unresolved_alert(rule, container):
+    if find_unresolved_alert(rule, container, username=username):
         return None
     now = datetime.now(timezone.utc)
     doc = {
@@ -705,6 +756,7 @@ def insert_alert(
         "severity": severity,
         "cpu_percent": cpu_percent,
         "mem_percent": mem_percent,
+        "username": username,
         "ts": now,
         "resolved": False,
         "resolved_at": None,
@@ -715,18 +767,27 @@ def insert_alert(
     return doc
 
 
-def resolve_alerts(rule, container):
+def resolve_alerts(rule, container, username=None):
     now = datetime.now(timezone.utc)
+    query = {"rule": rule, "container": container, "resolved": False}
+    if username is not None:
+        query["username"] = username
     get_db().alerts.update_many(
-        {"rule": rule, "container": container, "resolved": False},
+        query,
         {"$set": {"resolved": True, "resolved_at": now}},
     )
 
 
-def list_alerts(hours=24, active_only=False, containers_only=False):
+def list_alerts(hours=24, active_only=False, containers_only=False, username=None):
     hours = max(1, min(int(hours), 168))
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     query = {"ts": {"$gte": since}}
+    if username is not None:
+        query["$or"] = [
+            {"username": username},
+            {"username": {"$exists": False}},
+            {"username": None},
+        ]
     if active_only:
         query["resolved"] = False
     if containers_only:
@@ -764,7 +825,7 @@ def _timeline_action_title(action, container):
     return base
 
 
-def list_timeline(hours=24, limit=200):
+def list_timeline(hours=24, limit=200, username=None):
     hours = max(1, min(int(hours), 168))
     limit = max(1, min(int(limit), 500))
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -787,7 +848,7 @@ def list_timeline(hours=24, limit=200):
             "username": entry.get("username"),
         })
 
-    for alert in list_alerts(hours=hours, active_only=False):
+    for alert in list_alerts(hours=hours, active_only=False, username=username):
         events.append({
             "ts": alert["ts"],
             "type": "alert",
