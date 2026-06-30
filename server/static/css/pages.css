@@ -254,8 +254,8 @@ button.page-btn.page-btn-danger:focus-visible {
 .user-create-form {
   display: grid;
   grid-template-columns: 1fr 1fr auto auto;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .user-create-form input,
@@ -407,12 +407,27 @@ button.page-btn.page-btn-danger:focus-visible {
 
 .manage-users-page .page-main-wide {
   max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.manage-users-page .dash-summary {
+  margin-bottom: 0;
+}
+
+.manage-users-page .page-card {
+  margin: 0;
+}
+
+.manage-users-page .page-card + .page-card {
+  margin-top: 0;
 }
 
 .dash-summary {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
@@ -443,9 +458,9 @@ button.page-btn.page-btn-danger:focus-visible {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: 20px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .section-head h2 {
@@ -455,7 +470,7 @@ button.page-btn.page-btn-danger:focus-visible {
 .bulk-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 

@@ -1,0 +1,78 @@
+<section class="view" id="view-create-db">
+  <div id="create-error" class="error-banner" style="display:none;"></div>
+  <div id="create-success" class="success-banner" style="display:none;"></div>
+
+  <div class="form-card">
+    <h2>Spin up a new database</h2>
+    <div class="hint">Creates a container with its own volume</div>
+
+    <div class="section-label">Engine</div>
+    <div class="engine-grid" id="engine-grid">
+      <div class="engine-opt selected" data-engine="postgres">Postgres</div>
+      <div class="engine-opt" data-engine="mysql">MySQL</div>
+      <div class="engine-opt" data-engine="mongo">MongoDB</div>
+      <div class="engine-opt" data-engine="redis">Redis</div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Identifier (used in container name)</label>
+        <input type="text" id="f-name" placeholder="e.g. clients-db" />
+      </div>
+      <div class="field">
+        <label>Host port <span class="optional-label">(optional)</span></label>
+        <input type="number" id="f-port" placeholder="auto if empty" min="1024" max="65535" step="1" />
+        <small class="hint" id="port-hint">Leave empty to auto-pick a free port (5500–5999).</small>
+      </div>
+    </div>
+
+    <div class="field-row" id="row-username">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="f-username" placeholder="e.g. appuser" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="f-password" placeholder="min 4 characters" />
+      </div>
+    </div>
+
+    <div class="field-row" id="row-dbname">
+      <div class="field">
+        <label>Database name</label>
+        <input type="text" id="f-dbname" placeholder="e.g. clients" />
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Storage Mode</label>
+
+        <label class="toggle">
+          <input type="checkbox" id="f-persistent" checked>
+          <span class="slider"></span>
+          <span class="toggle-text">Persistent Storage</span>
+        </label>
+
+        <small class="hint">
+          OFF = Temporary database (data is deleted when the container is removed).
+        </small>
+      </div>
+    </div>
+
+    <div class="section-label" id="tables-label">Tables</div>
+    <div id="tables-container"></div>
+    <button class="ghost-btn" id="add-table-btn" type="button">+ Add table</button>
+
+    <div class="submit-row">
+      <button class="primary" id="submit-db-btn" type="button">Create database</button>
+    </div>
+
+    <div class="note">
+      The container is tagged so it shows up under <b>My Databases</b> on the dashboard, where you can
+      start/stop/restart it like anything else, or remove it for good.
+    </div>
+
+    <div class="result-block" id="result-block"></div>
+  </div>
+</section>

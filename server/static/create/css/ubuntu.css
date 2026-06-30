@@ -1,0 +1,29 @@
+#view-create-ubuntu {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.lang-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.lang-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--panel-2);
+}
+
+.lang-opt:has(input:checked) {
+  border-color: var(--cyan);
+  background: rgba(79, 195, 217, 0.08);
+}

@@ -6,6 +6,9 @@ services:
     container_name: zeno_mongo
     image: mongo:7
     restart: unless-stopped
+    labels:
+      zeno.app: "true"
+      zeno.app.kind: "core"
     environment:
       MONGO_INITDB_ROOT_USERNAME: zeno
       MONGO_INITDB_ROOT_PASSWORD: zenopass

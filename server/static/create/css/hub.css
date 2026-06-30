@@ -1,0 +1,125 @@
+/* Create hub */
+#view-create {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+#view-create > .form-card:first-child {
+  margin-bottom: 0;
+}
+
+.create-service-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 4px;
+}
+
+@media (max-width: 900px) {
+  .create-service-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.create-service-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 148px;
+}
+
+.create-service-card[hidden] {
+  display: none;
+}
+
+.create-card-body {
+  padding: 18px 18px 12px;
+}
+
+.create-service-card h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.create-service-card p {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.create-card-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px 18px;
+}
+
+.create-card-footer .primary,
+.create-card-footer .ghost-btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.create-available-panel {
+  margin-top: 20px;
+}
+
+.create-available-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.create-available-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.create-available-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.create-available-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.create-available-item .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.create-available-item .status-dot.running {
+  background: var(--green);
+}
+
+.create-available-item .status-dot.exited {
+  background: var(--muted);
+}
+
+.create-available-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}

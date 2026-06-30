@@ -3,8 +3,6 @@ const API_PREFIX = "/api/v1";
 let containers = [];
 const openRows = new Set();
 const openLogs = new Set();
-let selectedEngine = "postgres";
-let tableCount = 0;
 
 const HISTORY_LEN = 40;
 const SPARK_SMOOTHING = 0.14;
@@ -40,8 +38,6 @@ let timelineFilter = "all";
 let alertFilter = "all";
 
 const loadedLogs = new Set();
-
-const COL_TYPES = ["TEXT", "VARCHAR(255)", "INTEGER", "BIGINT", "BOOLEAN", "TIMESTAMP", "DECIMAL(10,2)"];
 
 const $ = id => document.getElementById(id);
 
@@ -96,11 +92,11 @@ const terminalHistory = new Map();
 const terminalCwd = new Map();
 const terminalShell = new Map();
 let terminalContainer = null;
-let selectedWebType = "nginx";
 let groupLayout = null;
 let groupsEditorData = null;
 let dragPayload = null;
 let tierFeaturesData = null;
+const uptimeStatExpanded = new Set();
 
 document.querySelectorAll(".nav-item").forEach(item => {
   item.addEventListener("click", () => {
@@ -108,7 +104,7 @@ document.querySelectorAll(".nav-item").forEach(item => {
     item.classList.add("active");
     const view = item.dataset.view;
     document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-    $(`view-${view}`).classList.add("active");
+    $(`view-${view}`)?.classList.add("active");
     const [title, sub] = VIEW_TITLES[view] || ["Zeno", ""];
     $("page-title").textContent = title;
     $("page-sub").textContent = sub;
@@ -116,7 +112,7 @@ document.querySelectorAll(".nav-item").forEach(item => {
       refreshHostDetails();
       renderHostCharts();
     }
-    if (view === "create") applyCreateFeatureCards();
+    if (view === "create") ZenoCreate?.hub?.applyCreateFeatureCards?.();
     if (view === "timeline") loadTimeline();
     if (view === "logs") loadCentralLogsPage();
     if (view === "alerts") loadAlertsPage();
@@ -181,28 +177,14 @@ async function loadProfile() {
     }
     const tierNav = $("nav-tier-features");
     if (tierNav) tierNav.hidden = !p.is_admin;
-    applyFeatureNav(p.features || {});
+    ZenoCreate?.hub?.applyFeatureNav?.(p.features || {});
   } catch {
     $("profile-name").textContent = "unknown";
   }
 }
 
 function applyFeatureNav(features) {
-  const createNav = $("nav-create");
-  const hasAnyCreate = Boolean(
-    features.create_database || features.create_ubuntu || features.create_web_server
-  );
-  if (createNav) createNav.hidden = !hasAnyCreate;
-
-  const cardMap = {
-    create_database: "create-card-database",
-    create_ubuntu: "create-card-ubuntu",
-    create_web_server: "create-card-web"
-  };
-  Object.entries(cardMap).forEach(([key, id]) => {
-    const el = $(id);
-    if (el) el.hidden = !features[key];
-  });
+  ZenoCreate?.hub?.applyFeatureNav?.(features);
 }
 
 function navigateToView(view) {
@@ -218,80 +200,6 @@ function navigateToView(view) {
   $("page-title").textContent = title;
   $("page-sub").textContent = sub;
 }
-
-function applyCreateFeatureCards() {
-  const features = currentUser.features || {};
-  applyFeatureNav(features);
-}
-
-const CREATE_TYPE_LABELS = {
-  database: "Database containers",
-  ubuntu: "Ubuntu servers",
-  web: "Web servers"
-};
-
-function filterContainersByCreateType(type) {
-  return (containers || []).filter(c => {
-    if (type === "database") return c.is_user_db;
-    if (type === "ubuntu") return c.is_user_server;
-    if (type === "web") return c.is_user_web;
-    return false;
-  });
-}
-
-function renderCreateAvailableList(type) {
-  const panel = $("create-available-panel");
-  const list = $("create-available-list");
-  const title = $("create-available-title");
-  if (!panel || !list) return;
-
-  const matches = filterContainersByCreateType(type);
-  if (title) title.textContent = CREATE_TYPE_LABELS[type] || "Available containers";
-
-  if (!matches.length) {
-    list.innerHTML = '<div class="empty">No containers found for this template.</div>';
-  } else {
-    list.innerHTML = matches.map(c => `
-      <div class="create-available-item">
-        <div>
-          <div>${escapeHtml(c.name)}</div>
-          <div class="create-available-meta">${escapeHtml(c.image || "")}${c.engine ? ` · ${escapeHtml(c.engine)}` : ""}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span class="status-dot ${escapeHtml(statusClass(c))}"></span>
-          <span>${escapeHtml(c.status)}</span>
-        </div>
-      </div>
-    `).join("");
-  }
-  panel.hidden = false;
-}
-
-document.querySelectorAll("[data-create-action]").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const type = btn.dataset.createType;
-    const action = btn.dataset.createAction;
-    if (!type) return;
-    if (action === "show") {
-      renderCreateAvailableList(type);
-      $("create-available-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      return;
-    }
-    if (action === "create") {
-      const viewMap = {
-        database: "create-db",
-        ubuntu: "create-ubuntu",
-        web: "create-web"
-      };
-      navigateToView(viewMap[type]);
-    }
-  });
-});
-
-$("create-available-close")?.addEventListener("click", () => {
-  const panel = $("create-available-panel");
-  if (panel) panel.hidden = true;
-});
 
 /* ---------------- Confirm dialog ---------------- */
 
@@ -358,6 +266,117 @@ function fmtSince(iso) {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return hrs + "h";
   return Math.floor(hrs / 24) + "d";
+}
+
+function containerUptimeSecs(iso) {
+  if (!iso || iso.startsWith("0001")) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 1000));
+}
+
+function fmtUptimeCompact(seconds) {
+  if (seconds == null) return "—";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function fmtUptimeExpanded(seconds) {
+  if (seconds == null) return "—";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
+function fmtStartedAtShort(iso) {
+  if (!iso || iso.startsWith("0001")) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function uptimeStatShort(c) {
+  if (c.status !== "running") return "—";
+  return "up " + fmtSince(c.started_at);
+}
+
+function uptimeStatExact(c) {
+  if (c.status !== "running") return "—";
+  const secs = containerUptimeSecs(c.started_at);
+  return `${fmtUptimeExpanded(secs)} · ${fmtStartedAtShort(c.started_at)}`;
+}
+
+function uptimeDetailTexts(c) {
+  if (c.status !== "running") return { line: "Stopped" };
+  const secs = containerUptimeSecs(c.started_at);
+  return { line: `${fmtUptimeExpanded(secs)} · ${fmtStartedAtShort(c.started_at)}` };
+}
+
+function applyUptimeToDom(name, c) {
+  if (!c) c = containers.find(x => x.name === name);
+  if (!c) return;
+
+  if (c.status !== "running") uptimeStatExpanded.delete(name);
+
+  const details = uptimeDetailTexts(c);
+  setStatText(`uptime-${name}`, details.line);
+
+  const statEl = $(`uptime-stat-${name}`);
+  if (!statEl) return;
+  if (uptimeStatExpanded.has(name) && c.status === "running") {
+    statEl.textContent = uptimeStatExact(c);
+    statEl.classList.add("exact");
+    statEl.title = "";
+  } else {
+    statEl.textContent = uptimeStatShort(c);
+    statEl.classList.remove("exact");
+    statEl.title = c.status === "running" ? uptimeStatExact(c) : "";
+  }
+}
+
+function wireUptimeStat(name) {
+  const el = $(`uptime-stat-${name}`);
+  if (!el || el.dataset.wired) return;
+  el.dataset.wired = "1";
+  el.addEventListener("click", e => {
+    e.stopPropagation();
+    const c = containers.find(x => x.name === name);
+    if (!c || c.status !== "running") return;
+    if (uptimeStatExpanded.has(name)) {
+      uptimeStatExpanded.delete(name);
+    } else {
+      uptimeStatExpanded.add(name);
+    }
+    applyUptimeToDom(name, c);
+  });
+}
+
+function refreshUptimeDisplays() {
+  containers.forEach(c => {
+    if ($(`uptime-stat-${c.name}`) || $(`uptime-${c.name}`)) {
+      applyUptimeToDom(c.name, c);
+    }
+  });
 }
 
 function setText(id, text) {
@@ -876,111 +895,132 @@ function renderGroupsEditor() {
   wireGroupsEditorEvents();
 }
 
-function wireGroupsEditorEvents() {
-  document.querySelectorAll(".group-container-chip[draggable=true]").forEach(chip => {
-    chip.addEventListener("dragstart", e => {
-      e.stopPropagation();
+let groupsEditorDnDWired = false;
+
+function parseGroupsDragPayload(e) {
+  if (dragPayload) return dragPayload;
+  const raw = e.dataTransfer?.getData("text/plain");
+  if (!raw) return null;
+  if (raw.startsWith("group:")) return { type: "group", id: raw.slice(6) };
+  return { type: "container", name: raw };
+}
+
+function clearGroupsDragUi() {
+  document.querySelectorAll(
+    ".group-editor-card.dragging, .group-container-chip.dragging, .group-drop-zone.drag-over, .group-container-chip.drag-over-chip"
+  ).forEach(el => {
+    el.classList.remove("dragging", "drag-over", "drag-over-chip");
+  });
+}
+
+function initGroupsEditorDnD() {
+  if (groupsEditorDnDWired) return;
+  const editor = $("groups-editor");
+  if (!editor) return;
+  groupsEditorDnDWired = true;
+
+  editor.addEventListener("dragstart", e => {
+    const chip = e.target.closest(".group-container-chip[draggable='true']");
+    if (chip) {
       dragPayload = { type: "container", name: chip.dataset.container };
       e.dataTransfer.setData("text/plain", chip.dataset.container);
       e.dataTransfer.effectAllowed = "move";
       chip.classList.add("dragging");
-    });
-    chip.addEventListener("dragend", () => {
-      chip.classList.remove("dragging");
-      dragPayload = null;
-    });
-    chip.addEventListener("dragover", e => {
-      if (dragPayload?.type === "container") {
-        e.preventDefault();
-        e.stopPropagation();
-        chip.classList.add("drag-over-chip");
-      }
-    });
-    chip.addEventListener("dragleave", () => chip.classList.remove("drag-over-chip"));
-    chip.addEventListener("drop", e => {
-      e.preventDefault();
-      e.stopPropagation();
-      chip.classList.remove("drag-over-chip");
-      if (dragPayload?.type !== "container") return;
-      const c = groupsEditorData.containers.find(x => x.name === dragPayload.name);
-      if (!c || c.is_core_app) return;
-      const zone = chip.closest(".group-drop-zone");
-      const gid = zone?.dataset.groupId;
-      if (!gid) return;
-      moveContainerInLayout(dragPayload.name, gid, chip.dataset.container);
-      renderGroupsEditor();
-    });
-  });
-
-  document.querySelectorAll(".drag-handle[draggable=true]").forEach(handle => {
-    handle.addEventListener("dragstart", e => {
-      e.stopPropagation();
+      return;
+    }
+    const handle = e.target.closest(".drag-handle[draggable='true']");
+    if (handle) {
       dragPayload = { type: "group", id: handle.dataset.dragGroup };
-      e.dataTransfer.setData("text/plain", "group:" + handle.dataset.dragGroup);
+      e.dataTransfer.setData("text/plain", `group:${handle.dataset.dragGroup}`);
       e.dataTransfer.effectAllowed = "move";
       handle.closest(".group-editor-card")?.classList.add("dragging");
-    });
-    handle.addEventListener("dragend", () => {
-      document.querySelectorAll(".group-editor-card.dragging").forEach(c => c.classList.remove("dragging"));
-      dragPayload = null;
-    });
+    }
   });
 
-  document.querySelectorAll(".group-drop-zone").forEach(zone => {
-    zone.addEventListener("dragover", e => {
-      e.preventDefault();
-      zone.classList.add("drag-over");
-    });
-    zone.addEventListener("dragleave", e => {
-      if (!zone.contains(e.relatedTarget)) zone.classList.remove("drag-over");
-    });
-    zone.addEventListener("drop", e => {
-      e.preventDefault();
-      zone.classList.remove("drag-over");
-      if (!dragPayload) return;
-
-      if (dragPayload.type === "container") {
-        const c = groupsEditorData.containers.find(x => x.name === dragPayload.name);
-        if (!c || c.is_core_app) return;
-        moveContainerInLayout(dragPayload.name, zone.dataset.groupId);
-        renderGroupsEditor();
-        return;
-      }
-
-      if (dragPayload.type === "group") {
-        const targetId = zone.dataset.groupId;
-        const groups = [...groupsEditorData.layout.groups].sort((a, b) => a.order - b.order);
-        const fromIdx = groups.findIndex(g => g.id === dragPayload.id);
-        const toIdx = groups.findIndex(g => g.id === targetId);
-        if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
-        const [moved] = groups.splice(fromIdx, 1);
-        groups.splice(toIdx, 0, moved);
-        groups.forEach((g, i) => { g.order = i; });
-        groupsEditorData.layout.groups = groups;
-        renderGroupsEditor();
-      }
-    });
+  editor.addEventListener("dragend", () => {
+    clearGroupsDragUi();
+    setTimeout(() => { dragPayload = null; }, 0);
   });
 
-  document.querySelectorAll("[data-del-group]").forEach(btn => {
-    btn.addEventListener("click", async e => {
-      e.stopPropagation();
-      const gid = btn.dataset.delGroup;
-      if (!await showConfirm("Delete this group? Containers will move to another group.", {
-        title: "Delete group",
-        confirmLabel: "Delete"
-      })) return;
-      try {
-        const res = await api(`${API_PREFIX}/groups/${encodeURIComponent(gid)}`, { method: "DELETE" });
-        groupsEditorData.layout = res.layout;
-        groupLayout = res.layout;
-        renderGroupsEditor();
-        showGroupsBanner("groups-success", "Group deleted.");
-      } catch (err) {
-        showGroupsBanner("groups-error", err.message);
-      }
-    });
+  editor.addEventListener("dragover", e => {
+    const payload = parseGroupsDragPayload(e);
+    if (!payload) return;
+    const zone = e.target.closest(".group-drop-zone");
+    const chip = e.target.closest(".group-container-chip[draggable='true']");
+    if (!zone && !chip) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (zone) zone.classList.add("drag-over");
+    if (chip && payload.type === "container") chip.classList.add("drag-over-chip");
   });
+
+  editor.addEventListener("dragleave", e => {
+    const zone = e.target.closest(".group-drop-zone");
+    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove("drag-over");
+    const chip = e.target.closest(".group-container-chip");
+    if (chip && !chip.contains(e.relatedTarget)) chip.classList.remove("drag-over-chip");
+  });
+
+  editor.addEventListener("drop", e => {
+    e.preventDefault();
+    clearGroupsDragUi();
+    const payload = parseGroupsDragPayload(e);
+    if (!payload || !groupsEditorData?.layout) return;
+
+    const zone = e.target.closest(".group-drop-zone");
+    const chip = e.target.closest(".group-container-chip[draggable='true']");
+
+    if (payload.type === "container") {
+      if (!zone) return;
+      const c = groupsEditorData.containers.find(x => x.name === payload.name);
+      if (!c || c.is_core_app) return;
+      const beforeName = chip && chip.dataset.container !== payload.name
+        ? chip.dataset.container
+        : null;
+      moveContainerInLayout(payload.name, zone.dataset.groupId, beforeName);
+      renderGroupsEditor();
+      return;
+    }
+
+    if (payload.type === "group" && zone) {
+      const targetId = zone.dataset.groupId;
+      const groups = [...groupsEditorData.layout.groups].sort(
+        (a, b) => (a.order ?? 0) - (b.order ?? 0)
+      );
+      const fromIdx = groups.findIndex(g => g.id === payload.id);
+      const toIdx = groups.findIndex(g => g.id === targetId);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+      const [moved] = groups.splice(fromIdx, 1);
+      groups.splice(toIdx, 0, moved);
+      groups.forEach((g, i) => { g.order = i; });
+      groupsEditorData.layout.groups = groups;
+      renderGroupsEditor();
+    }
+  });
+
+  editor.addEventListener("click", async e => {
+    const btn = e.target.closest("[data-del-group]");
+    if (!btn) return;
+    e.stopPropagation();
+    const gid = btn.dataset.delGroup;
+    if (!await showConfirm("Delete this group? Containers will move to another group.", {
+      title: "Delete group",
+      confirmLabel: "Delete"
+    })) return;
+    try {
+      const res = await api(`${API_PREFIX}/groups/${encodeURIComponent(gid)}`, { method: "DELETE" });
+      groupsEditorData.layout = res.layout;
+      groupLayout = res.layout;
+      renderGroupsEditor();
+      showGroupsBanner("groups-success", "Group deleted.");
+    } catch (err) {
+      showGroupsBanner("groups-error", err.message);
+    }
+  });
+}
+
+function wireGroupsEditorEvents() {
+  initGroupsEditorDnD();
 }
 
 async function loadGroupsEditor() {
@@ -1107,8 +1147,11 @@ $("save-tier-features-btn")?.addEventListener("click", async () => {
 
 function groupOrder(g) {
   const order = [
-    "Core Apps", "My Databases", "My Servers", "My Web Servers",
-    "Databases", "Tools & UI", "Automation", "Other"
+    "Core Apps",
+    "Existing",
+    "My Databases",
+    "My Servers",
+    "My Web Servers"
   ];
   const i = order.indexOf(g);
   return i === -1 ? order.length : i;
@@ -1132,14 +1175,14 @@ function renderActionsHtml(c) {
 function patchContainerRows() {
   containers.forEach(c => {
     const rowMain = $(`row-main-${c.name}`);
+    if (rowMain || $(`details-${c.name}`)) applyUptimeToDom(c.name, c);
     if (!rowMain) return;
     const cls = statusClass(c);
     const dot = rowMain.querySelector(".dot");
     if (dot) dot.className = "dot " + cls;
     const meta = rowMain.querySelector(".meta");
     if (meta) meta.textContent = c.image;
-    const stat = rowMain.querySelector(".stat");
-    if (stat) stat.textContent = c.status === "running" ? "up " + fmtSince(c.started_at) : "—";
+    wireUptimeStat(c.name);
     const badge = rowMain.querySelector(".badge");
     if (badge) {
       badge.className = "badge " + cls;
@@ -1223,18 +1266,21 @@ function render() {
     const rowEl = $(`row-main-${c.name}`);
     if (rowEl) {
       rowEl.addEventListener("click", e => {
-        if (e.target.closest("button") || e.target.closest("a")) return;
+        if (e.target.closest("button") || e.target.closest("a") || e.target.closest(".uptime-stat")) return;
         toggleDetails(c.name);
       });
     }
+    wireUptimeStat(c.name);
   });
   openLogs.forEach(name => loadLogs(name));
   openRows.forEach(name => {
+    const c = containers.find(x => x.name === name);
     const cached = statsCache.get(name);
     if (cached) {
       applyStatsToDom(name, cached);
       renderContainerMetricCharts(name);
     }
+    if (c) applyUptimeToDom(name, c);
     loadContainerMetricHistory(name);
   });
 }
@@ -1244,13 +1290,15 @@ function renderRow(c) {
   const isOpen = openRows.has(c.name);
   const ports = c.ports.length ? c.ports.join(", ") : "no published ports";
   const stats = cachedStatTexts(c.name);
+  const uptimeDetails = uptimeDetailTexts(c);
+  const uptimeTitle = c.status === "running" ? uptimeStatExact(c) : "";
   return `
   <div class="row">
     <div class="row-main" id="row-main-${c.name}">
       <div class="dot ${cls}"></div>
       <div class="name">${c.name}</div>
       <div class="meta">${c.image}</div>
-      <div class="stat">${c.status === "running" ? "up " + fmtSince(c.started_at) : "—"}</div>
+      <div class="stat uptime-stat" id="uptime-stat-${c.name}" title="${escapeHtml(uptimeTitle)}">${uptimeStatShort(c)}</div>
       <div class="badge ${cls}">${c.status}</div>
       <div class="actions">
         ${renderActionsHtml(c)}
@@ -1259,15 +1307,18 @@ function renderRow(c) {
     </div>
     <div class="details ${isOpen ? "open" : ""}" id="details-${c.name}">
       <div class="ports">Ports: <span>${ports}</span></div>
-      <div class="ports">
-        CPU: <span id="cpu-${c.name}">${stats.cpu}</span>
-        &nbsp;&nbsp;|&nbsp;&nbsp;
-        Memory: <span id="mem-${c.name}">${stats.mem}</span>
+      <div class="ports container-stats-line">
+        Running: <span id="uptime-${c.name}" class="stat-value">${uptimeDetails.line}</span>
       </div>
       <div class="ports">
-        Network: <span id="net-${c.name}">${stats.net}</span>
+        CPU: <span id="cpu-${c.name}" class="stat-value">${stats.cpu}</span>
         &nbsp;&nbsp;|&nbsp;&nbsp;
-        Disk I/O: <span id="disk-${c.name}">${stats.disk}</span>
+        Memory: <span id="mem-${c.name}" class="stat-value">${stats.mem}</span>
+      </div>
+      <div class="ports">
+        Network: <span id="net-${c.name}" class="stat-value">${stats.net}</span>
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+        Disk I/O: <span id="disk-${c.name}" class="stat-value">${stats.disk}</span>
       </div>
       <div class="metric-charts" id="metric-charts-${c.name}">
         <div class="metric-chart-card">
@@ -1483,6 +1534,7 @@ function refreshOpenRowStats() {
     const c = containers.find(x => x.name === name);
     if (!c || c.status !== "running") continue;
     loadStats(name, { force: true });
+    applyUptimeToDom(name, c);
   }
 }
 
@@ -1524,310 +1576,6 @@ window.deleteContainer = async function deleteContainer(name) {
     showError(`Failed to delete ${name}: ` + e.message);
   }
 };
-
-/* ---------------- Create DB form ---------------- */
-
-document.querySelectorAll(".engine-opt").forEach(opt => {
-  opt.addEventListener("click", () => {
-    document.querySelectorAll(".engine-opt").forEach(o => o.classList.remove("selected"));
-    opt.classList.add("selected");
-    selectedEngine = opt.dataset.engine;
-    applyEngineFieldVisibility();
-  });
-});
-
-function applyEngineFieldVisibility() {
-  const isRedis = selectedEngine === "redis";
-  $("row-username").style.display = isRedis ? "none" : "flex";
-  $("row-dbname").style.display = isRedis ? "none" : "flex";
-  const tablesApplicable =
-    selectedEngine === "postgres" || selectedEngine === "mysql" || selectedEngine === "mongo";
-  $("tables-label").textContent =
-    selectedEngine === "mongo" ? "Initial collections (optional)" : "Initial tables (optional)";
-  $("tables-label").style.display = tablesApplicable ? "block" : "none";
-  $("tables-container").style.display = tablesApplicable ? "block" : "none";
-  $("add-table-btn").style.display = tablesApplicable ? "block" : "none";
-}
-
-window.addTableBlock = function addTableBlock() {
-  tableCount++;
-  const id = "tbl_" + tableCount;
-  const wrap = document.createElement("div");
-  wrap.className = "table-block";
-  wrap.id = id;
-  const isMongo = selectedEngine === "mongo";
-  wrap.innerHTML = `
-    <div class="table-block-head">
-      <input type="text" placeholder="${isMongo ? "collection name" : "table name"}" class="tbl-name" />
-      <button class="small-btn danger" onclick="document.getElementById('${id}').remove()">✕</button>
-    </div>
-    <div class="cols-holder" style="display:${isMongo ? "none" : "block"}"></div>
-    <button class="ghost-btn small-btn" type="button" onclick="addColumnRow('${id}')" style="display:${isMongo ? "none" : "block"}">+ Add column</button>
-  `;
-  $("tables-container").appendChild(wrap);
-  if (!isMongo) addColumnRow(id);
-};
-
-window.addColumnRow = function addColumnRow(tableId) {
-  const holder = document.querySelector(`#${tableId} .cols-holder`);
-  const row = document.createElement("div");
-  row.className = "col-row";
-  const typeOptions = COL_TYPES.map(t => `<option value="${t}">${t}</option>`).join("");
-  row.innerHTML = `
-    <input type="text" placeholder="column name" class="col-name" />
-    <select class="col-type">${typeOptions}</select>
-    <button class="small-btn danger" type="button" onclick="this.parentElement.remove()">✕</button>
-  `;
-  holder.appendChild(row);
-};
-
-$("add-table-btn").addEventListener("click", addTableBlock);
-
-function collectTables() {
-  const tables = [];
-  document.querySelectorAll(".table-block").forEach(block => {
-    const tname = block.querySelector(".tbl-name").value.trim();
-    if (!tname) return;
-    const columns = [];
-    block.querySelectorAll(".col-row").forEach(row => {
-      const cname = row.querySelector(".col-name").value.trim();
-      const ctype = row.querySelector(".col-type").value;
-      if (cname) columns.push({ name: cname, type: ctype });
-    });
-    tables.push({ name: tname, columns });
-  });
-  return tables;
-}
-
-function showCreateError(msg) {
-  const el = $("create-error");
-  if (!msg) {
-    el.style.display = "none";
-    return;
-  }
-  el.textContent = msg;
-  el.style.display = "block";
-}
-
-function showCreateSuccess(msg) {
-  const el = $("create-success");
-  if (!msg) {
-    el.style.display = "none";
-    return;
-  }
-  el.textContent = msg;
-  el.style.display = "block";
-}
-
-function parseHostPort(raw) {
-  if (raw === "" || raw == null) return null;
-  const port = Number.parseInt(String(raw).trim(), 10);
-  if (!Number.isFinite(port)) return null;
-  return port;
-}
-
-function validateHostPort(raw) {
-  const port = parseHostPort(raw);
-  if (port == null) return "Pick a host port.";
-  if (port < 1) return "Port cannot be zero or negative.";
-  if (port < 1024) return "Port must be at least 1024.";
-  if (port > 65535) return "Port cannot exceed 65535.";
-  if (isPortUsedByContainer(port)) {
-    return `Port ${port} is already used by another container on this host.`;
-  }
-  return null;
-}
-
-function isPortUsedByContainer(port) {
-  const needle = `${port}->`;
-  return containers.some(c => (c.ports || []).some(binding => binding.startsWith(needle)));
-}
-
-function updatePortHint() {
-  const hint = $("port-hint");
-  const input = $("f-port");
-  if (!hint || !input) return;
-
-  const err = validateHostPort(input.value);
-  if (err && input.value !== "") {
-    hint.textContent = err;
-    hint.style.color = "var(--red)";
-  } else {
-    hint.textContent = "Must be between 1024 and 65535.";
-    hint.style.color = "var(--muted)";
-  }
-}
-
-function showBanner(elId, msg) {
-  const el = $(elId);
-  if (!el) return;
-  if (!msg) {
-    el.style.display = "none";
-    return;
-  }
-  el.textContent = msg;
-  el.style.display = "block";
-}
-
-$("f-port")?.addEventListener("input", () => {
-  const input = $("f-port");
-  if (!input) return;
-  if (input.value !== "" && Number(input.value) < 0) {
-    input.value = String(Math.abs(Number(input.value)));
-  }
-  updatePortHint();
-});
-
-document.querySelectorAll("#web-type-grid .engine-opt").forEach(opt => {
-  opt.addEventListener("click", () => {
-    document.querySelectorAll("#web-type-grid .engine-opt").forEach(o => o.classList.remove("selected"));
-    opt.classList.add("selected");
-    selectedWebType = opt.dataset.type;
-  });
-});
-
-function collectLanguages() {
-  return [...document.querySelectorAll("#lang-grid input:checked")].map(cb => cb.value);
-}
-
-$("submit-ubuntu-btn")?.addEventListener("click", async () => {
-  showBanner("ubuntu-error", null);
-  showBanner("ubuntu-success", null);
-  $("ubuntu-result").innerHTML = "";
-
-  const name = $("ubuntu-name").value.trim();
-  if (!name) return showBanner("ubuntu-error", "Enter a server name.");
-
-  const btn = $("submit-ubuntu-btn");
-  btn.disabled = true;
-  btn.textContent = "Creating…";
-
-  try {
-    const res = await api(`${API_PREFIX}/servers/ubuntu`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        persistent: $("ubuntu-persistent").checked,
-        languages: collectLanguages()
-      })
-    });
-    const langs = res.languages?.length ? res.languages.join(", ") : "none";
-    showBanner(
-      "ubuntu-success",
-      `Created ${res.container.name}. Languages: ${langs}. Workspace: ${res.workspace}`
-    );
-    $("ubuntu-result").innerHTML =
-      `<div class="ok">Expand the container on the dashboard and use <b>Open terminal</b> to run commands.</div>`;
-    containerListKey = "";
-    refreshContainers();
-  } catch (e) {
-    showBanner("ubuntu-error", e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Create Ubuntu server";
-  }
-});
-
-$("submit-web-btn")?.addEventListener("click", async () => {
-  showBanner("web-error", null);
-  showBanner("web-success", null);
-  $("web-result").innerHTML = "";
-
-  const name = $("web-name").value.trim();
-  if (!name) return showBanner("web-error", "Enter a server name.");
-
-  const rawPort = $("web-port").value.trim();
-  let hostPort = null;
-  if (rawPort !== "") {
-    hostPort = parseHostPort(rawPort);
-    if (hostPort == null || hostPort < 1024 || hostPort > 65535) {
-      return showBanner("web-error", "Host port must be between 1024 and 65535.");
-    }
-    if (isPortUsedByContainer(hostPort)) {
-      return showBanner("web-error", `Port ${hostPort} is already used by another container.`);
-    }
-  }
-
-  const btn = $("submit-web-btn");
-  btn.disabled = true;
-  btn.textContent = "Creating…";
-
-  try {
-    const payload = {
-      name,
-      type: selectedWebType,
-      persistent: $("web-persistent").checked
-    };
-    if (hostPort != null) payload.host_port = hostPort;
-
-    const res = await api(`${API_PREFIX}/servers/web`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    showBanner("web-success", `Created ${res.container.name} (${res.type}) at ${res.url}`);
-    $("web-result").innerHTML =
-      `<div class="ok"><a href="${res.url}" target="_blank" rel="noopener">Open ${res.url}</a></div>`;
-    containerListKey = "";
-    refreshContainers();
-  } catch (e) {
-    showBanner("web-error", e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Create web server";
-  }
-});
-
-$("submit-db-btn").addEventListener("click", async () => {
-  showCreateError(null);
-  showCreateSuccess(null);
-  $("result-block").innerHTML = "";
-
-  const portError = validateHostPort($("f-port").value);
-  if (portError) return showCreateError(portError);
-
-  const payload = {
-    engine: selectedEngine,
-    name: $("f-name").value.trim(),
-    host_port: parseHostPort($("f-port").value),
-    username: $("f-username").value.trim(),
-    password: $("f-password").value,
-    db_name: $("f-dbname").value.trim(),
-    tables: collectTables(),
-    persistent: $("f-persistent").checked
-  };
-
-  if (!payload.name) return showCreateError("Give it an identifier first.");
-
-  const btn = $("submit-db-btn");
-  btn.disabled = true;
-  btn.textContent = "Creating…";
-
-  try {
-    const res = await api(`${API_PREFIX}/databases`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    showCreateSuccess(
-      `Created zeno_userdb_${payload.name} (${selectedEngine}) on port ${payload.host_port}. ` +
-        (res.ready ? "It is up and responding." : res.warning || "")
-    );
-    if (res.tables && res.tables.length) {
-      $("result-block").innerHTML = res.tables.map(t =>
-        `<div class="${t.ok ? "ok" : "bad"}">${t.ok ? "✓" : "✗"} ${t.table}${t.ok ? "" : " — " + t.detail}</div>`
-      ).join("");
-    }
-    containerListKey = "";
-    refreshContainers();
-  } catch (e) {
-    showCreateError(e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Create database";
-  }
-});
 
 function scheduleResizeRedraw() {
   if (resizeRaf) cancelAnimationFrame(resizeRaf);
@@ -2327,7 +2075,29 @@ $("alerts-badge")?.addEventListener("click", () => {
 async function boot() {
   if (location.pathname === "/login") return;
 
-  applyEngineFieldVisibility();
+  if (window.ZenoCreate) {
+    try {
+      await ZenoCreate.init({
+        api,
+        $,
+        API_PREFIX,
+        getContainers: () => containers,
+        getCurrentUser: () => currentUser,
+        escapeHtml,
+        statusClass,
+        navigateToView,
+        invalidateContainerList: () => { containerListKey = ""; },
+        refreshContainers
+      });
+    } catch (e) {
+      console.error("Create views failed to load:", e);
+      const mount = $("create-views-mount");
+      if (mount) {
+        mount.innerHTML =
+          '<div class="error-banner">Create menu failed to load. Refresh the page or rebuild the dashboard image.</div>';
+      }
+    }
+  }
   await loadProfile();
   startSparkAnimation();
   refreshContainers();
@@ -2336,6 +2106,7 @@ async function boot() {
   containerRefreshTimer = setInterval(refreshContainers, 10000);
   statsRefreshTimer = setInterval(refreshContainerStats, STATS_TICK_MS);
   openStatsTimer = setInterval(refreshOpenRowStats, STATS_POLL_OPEN_MS);
+  setInterval(refreshUptimeDisplays, STATS_TICK_MS);
   alertsTimer = setInterval(refreshAlerts, 30000);
   refreshAlerts();
   window.addEventListener("resize", scheduleResizeRedraw);

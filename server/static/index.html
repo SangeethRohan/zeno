@@ -12,6 +12,10 @@
   <!-- FIXED PATHS -->
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/dashboard.css">
+  <link rel="stylesheet" href="/static/create/css/hub.css">
+  <link rel="stylesheet" href="/static/create/css/database.css">
+  <link rel="stylesheet" href="/static/create/css/ubuntu.css">
+  <link rel="stylesheet" href="/static/create/css/web.css">
 </head>
 
 <body>
@@ -249,224 +253,7 @@
         </div>
       </section>
 
-      <section class="view" id="view-create">
-        <div class="form-card">
-          <h2>Create a service</h2>
-          <div class="hint">Choose a template below to view existing containers or spin up a new one.</div>
-
-          <div class="create-service-grid" id="create-service-grid">
-          <article class="create-service-card" data-create-type="database" id="create-card-database">
-            <div class="create-card-body">
-              <h3>Database</h3>
-              <p>Postgres, MySQL, MongoDB, or Redis with persistent volumes.</p>
-            </div>
-            <div class="create-card-footer">
-              <button type="button" class="ghost-btn small-btn" data-create-action="show" data-create-type="database">Show available</button>
-              <button type="button" class="primary small-btn" data-create-action="create" data-create-type="database">Create</button>
-            </div>
-          </article>
-          <article class="create-service-card" data-create-type="ubuntu" id="create-card-ubuntu">
-            <div class="create-card-body">
-              <h3>Ubuntu Server</h3>
-              <p>Dev sandbox with optional language toolchains and persistent workspace.</p>
-            </div>
-            <div class="create-card-footer">
-              <button type="button" class="ghost-btn small-btn" data-create-action="show" data-create-type="ubuntu">Show available</button>
-              <button type="button" class="primary small-btn" data-create-action="create" data-create-type="ubuntu">Create</button>
-            </div>
-          </article>
-          <article class="create-service-card" data-create-type="web" id="create-card-web">
-            <div class="create-card-body">
-              <h3>Web Server</h3>
-              <p>Nginx, Apache, Caddy, or Traefik with a published host port.</p>
-            </div>
-            <div class="create-card-footer">
-              <button type="button" class="ghost-btn small-btn" data-create-action="show" data-create-type="web">Show available</button>
-              <button type="button" class="primary small-btn" data-create-action="create" data-create-type="web">Create</button>
-            </div>
-          </article>
-          </div>
-        </div>
-
-        <div class="form-card create-available-panel" id="create-available-panel" hidden>
-          <div class="create-available-head">
-            <h2 id="create-available-title">Available containers</h2>
-            <button type="button" class="ghost-btn small-btn" id="create-available-close">Close</button>
-          </div>
-          <div id="create-available-list" class="create-available-list">
-            <div class="empty">No containers found for this template.</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" id="view-create-db">
-        <div id="create-error" class="error-banner" style="display:none;"></div>
-        <div id="create-success" class="success-banner" style="display:none;"></div>
-
-        <div class="form-card">
-          <h2>Spin up a new database</h2>
-          <div class="hint">Creates a container with its own volume</div>
-
-          <div class="section-label">Engine</div>
-          <div class="engine-grid" id="engine-grid">
-            <div class="engine-opt selected" data-engine="postgres">Postgres</div>
-            <div class="engine-opt" data-engine="mysql">MySQL</div>
-            <div class="engine-opt" data-engine="mongo">MongoDB</div>
-            <div class="engine-opt" data-engine="redis">Redis</div>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label>Identifier (used in container name)</label>
-              <input type="text" id="f-name" placeholder="e.g. clients-db" />
-            </div>
-            <div class="field">
-              <label>Host port</label>
-              <input type="number" id="f-port" placeholder="e.g. 5440" min="1024" max="65535" step="1" />
-              <small class="hint" id="port-hint">Must be between 1024 and 65535.</small>
-            </div>
-          </div>
-
-          <div class="field-row" id="row-username">
-            <div class="field">
-              <label>Username</label>
-              <input type="text" id="f-username" placeholder="e.g. appuser" />
-            </div>
-            <div class="field">
-              <label>Password</label>
-              <input type="password" id="f-password" placeholder="min 4 characters" />
-            </div>
-          </div>
-
-          <div class="field-row" id="row-dbname">
-            <div class="field">
-              <label>Database name</label>
-              <input type="text" id="f-dbname" placeholder="e.g. clients" />
-            </div>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label>Storage Mode</label>
-
-              <label class="toggle">
-                <input type="checkbox" id="f-persistent" checked>
-                <span class="slider"></span>
-                <span class="toggle-text">Persistent Storage</span>
-              </label>
-
-              <small class="hint">
-                OFF = Temporary database (data is deleted when the container is removed).
-              </small>
-            </div>
-          </div>
-
-          <div class="section-label" id="tables-label">Tables</div>
-          <div id="tables-container"></div>
-          <button class="ghost-btn" id="add-table-btn" type="button">+ Add table</button>
-
-          <div class="submit-row">
-            <button class="primary" id="submit-db-btn" type="button">Create database</button>
-          </div>
-
-          <div class="note">
-            The container is tagged so it shows up under <b>My Databases</b> on the dashboard, where you can
-            start/stop/restart it like anything else, or remove it for good.
-          </div>
-
-          <div class="result-block" id="result-block"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-create-ubuntu">
-        <div id="ubuntu-error" class="error-banner" style="display:none;"></div>
-        <div id="ubuntu-success" class="success-banner" style="display:none;"></div>
-
-        <div class="form-card">
-          <h2>Create Ubuntu Server</h2>
-          <div class="hint">Dev sandbox with persistent /workspace — run commands via Docker CLI terminal</div>
-
-          <div class="field">
-            <label>Server name</label>
-            <input type="text" id="ubuntu-name" placeholder="e.g. dev-box" />
-          </div>
-
-          <div class="section-label">Programming languages (optional)</div>
-          <div class="hint">Select one or more to install toolchains and sample projects in /workspace/samples</div>
-          <div class="lang-grid" id="lang-grid">
-            <label class="lang-opt"><input type="checkbox" value="python" /> Python</label>
-            <label class="lang-opt"><input type="checkbox" value="java" /> Java</label>
-            <label class="lang-opt"><input type="checkbox" value="c" /> C</label>
-            <label class="lang-opt"><input type="checkbox" value="cpp" /> C++</label>
-            <label class="lang-opt"><input type="checkbox" value="go" /> Go</label>
-            <label class="lang-opt"><input type="checkbox" value="node" /> Node.js</label>
-            <label class="lang-opt"><input type="checkbox" value="rust" /> Rust</label>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label class="toggle">
-                <input type="checkbox" id="ubuntu-persistent" checked>
-                <span class="slider"></span>
-                <span class="toggle-text">Persistent /workspace volume</span>
-              </label>
-            </div>
-          </div>
-
-          <div class="submit-row">
-            <button class="primary" id="submit-ubuntu-btn" type="button">Create Ubuntu server</button>
-          </div>
-
-          <div class="result-block" id="ubuntu-result"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-create-web">
-        <div id="web-error" class="error-banner" style="display:none;"></div>
-        <div id="web-success" class="success-banner" style="display:none;"></div>
-
-        <div class="form-card">
-          <h2>Create Web Server</h2>
-          <div class="hint">Spin up a web server container with a published host port</div>
-
-          <div class="section-label">Server type</div>
-          <div class="engine-grid" id="web-type-grid">
-            <div class="engine-opt selected" data-type="nginx">Nginx</div>
-            <div class="engine-opt" data-type="apache">Apache</div>
-            <div class="engine-opt" data-type="caddy">Caddy</div>
-            <div class="engine-opt" data-type="traefik">Traefik</div>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label>Server name</label>
-              <input type="text" id="web-name" placeholder="e.g. my-site" />
-            </div>
-            <div class="field">
-              <label>Host port</label>
-              <input type="number" id="web-port" placeholder="auto if empty" min="1024" max="65535" step="1" />
-              <small class="hint">Leave empty to auto-pick a free port (8080–8999)</small>
-            </div>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label class="toggle">
-                <input type="checkbox" id="web-persistent">
-                <span class="slider"></span>
-                <span class="toggle-text">Persistent web root volume</span>
-              </label>
-              <small class="hint">Available for Nginx, Apache, and Caddy</small>
-            </div>
-          </div>
-
-          <div class="submit-row">
-            <button class="primary" id="submit-web-btn" type="button">Create web server</button>
-          </div>
-
-          <div class="result-block" id="web-result"></div>
-        </div>
-      </section>
+      <div id="create-views-mount"></div>
 
       <section class="view" id="view-manage-groups">
         <div id="groups-error" class="error-banner" style="display:none;"></div>
@@ -475,7 +262,7 @@
         <div class="form-card">
           <h2>Organize containers</h2>
           <div class="hint">
-            <b>Core Apps</b> is locked. Drag other groups and containers to customize your dashboard layout.
+            <b>Core Apps</b> is locked. Pre-existing containers start in <b>Existing</b> — drag groups and containers to customize your dashboard layout.
             Changes are saved per user.
           </div>
 
@@ -537,6 +324,11 @@
     </div>
   </div>
 
+  <script src="/static/create/js/index.js"></script>
+  <script src="/static/create/js/hub.js"></script>
+  <script src="/static/create/js/database.js"></script>
+  <script src="/static/create/js/ubuntu.js"></script>
+  <script src="/static/create/js/web.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>

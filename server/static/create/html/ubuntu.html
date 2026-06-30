@@ -1,0 +1,42 @@
+<section class="view" id="view-create-ubuntu">
+  <div id="ubuntu-error" class="error-banner" style="display:none;"></div>
+  <div id="ubuntu-success" class="success-banner" style="display:none;"></div>
+
+  <div class="form-card">
+    <h2>Create Ubuntu Server</h2>
+    <div class="hint">Dev sandbox with persistent /workspace — run commands via Docker CLI terminal</div>
+
+    <div class="field">
+      <label>Server name</label>
+      <input type="text" id="ubuntu-name" placeholder="e.g. dev-box" />
+    </div>
+
+    <div class="section-label">Programming languages (optional)</div>
+    <div class="hint">Select one or more to install toolchains and sample projects in /workspace/samples</div>
+    <div class="lang-grid" id="lang-grid">
+      <label class="lang-opt"><input type="checkbox" value="python" /> Python</label>
+      <label class="lang-opt"><input type="checkbox" value="java" /> Java</label>
+      <label class="lang-opt"><input type="checkbox" value="c" /> C</label>
+      <label class="lang-opt"><input type="checkbox" value="cpp" /> C++</label>
+      <label class="lang-opt"><input type="checkbox" value="go" /> Go</label>
+      <label class="lang-opt"><input type="checkbox" value="node" /> Node.js</label>
+      <label class="lang-opt"><input type="checkbox" value="rust" /> Rust</label>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label class="toggle">
+          <input type="checkbox" id="ubuntu-persistent" checked>
+          <span class="slider"></span>
+          <span class="toggle-text">Persistent /workspace volume</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="submit-row">
+      <button class="primary" id="submit-ubuntu-btn" type="button">Create Ubuntu server</button>
+    </div>
+
+    <div class="result-block" id="ubuntu-result"></div>
+  </div>
+</section>

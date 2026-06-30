@@ -356,6 +356,30 @@ canvas.spark {
   text-align: right;
 }
 
+.stat.uptime-stat {
+  min-width: 0;
+  width: max-content;
+  display: inline-block;
+  cursor: pointer;
+  border-bottom: 1px dashed #333D4A;
+  transition: color .12s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.stat.uptime-stat:hover,
+.stat.uptime-stat.exact {
+  color: var(--cyan);
+}
+
+.ports.container-stats-line {
+  line-height: 1.5;
+}
+
+.ports .stat-value {
+  color: var(--text);
+}
+
 .badge {
   font-family: var(--mono);
   font-size: 10.5px;
@@ -516,12 +540,6 @@ pre.logs {
   margin-bottom: 20px;
 }
 
-/* ---------- Create DB form ---------- */
-#view-create-db {
-  max-width: 640px;
-  margin: 0 auto;
-}
-
 .form-card {
   padding: 24px;
   width: 100%;
@@ -613,39 +631,6 @@ pre.logs {
   text-transform: uppercase;
   color: var(--muted);
   margin: 20px 0 10px;
-}
-
-.table-block {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 10px;
-  background: var(--panel-2);
-}
-
-.table-block-head {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.table-block-head input {
-  flex: 1;
-}
-
-.col-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.col-row input {
-  flex: 2;
-}
-
-.col-row select {
-  flex: 1;
 }
 
 .small-btn {
@@ -828,31 +813,6 @@ pre.logs {
   max-height: 220px;
 }
 
-.lang-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
-.lang-opt {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  cursor: pointer;
-  background: var(--panel-2);
-}
-
-.lang-opt:has(input:checked) {
-  border-color: var(--cyan);
-  background: rgba(79, 195, 217, 0.08);
-}
-
 .terminal-modal {
   position: fixed;
   inset: 0;
@@ -995,7 +955,7 @@ pre.logs {
 .groups-editor {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .group-editor-card {
@@ -1054,6 +1014,8 @@ pre.logs {
   font-size: 11px;
   color: var(--muted);
   padding: 8px;
+  width: 100%;
+  pointer-events: none;
 }
 
 .group-container-chip {
@@ -1632,132 +1594,6 @@ pre.logs {
   background: rgba(248, 81, 73, 0.1);
   border-color: #4A2A28;
   color: var(--red);
-}
-
-/* ---------- Create hub ---------- */
-#view-create {
-  max-width: 960px;
-  margin: 0 auto;
-}
-
-#view-create > .form-card:first-child {
-  margin-bottom: 0;
-}
-
-.create-service-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 4px;
-}
-
-@media (max-width: 900px) {
-  .create-service-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.create-service-card {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  min-height: 148px;
-}
-
-.create-service-card[hidden] {
-  display: none;
-}
-
-.create-card-body {
-  padding: 18px 18px 12px;
-}
-
-.create-service-card h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.create-service-card p {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
-.create-card-footer {
-  display: flex;
-  gap: 8px;
-  padding: 12px 18px 18px;
-}
-
-.create-card-footer .primary,
-.create-card-footer .ghost-btn {
-  flex: 1;
-  justify-content: center;
-}
-
-.create-available-panel {
-  margin-top: 20px;
-}
-
-.create-available-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.create-available-head h2 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.create-available-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.create-available-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel-2);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
-.create-available-item .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.create-available-item .status-dot.running {
-  background: var(--green);
-}
-
-.create-available-item .status-dot.exited {
-  background: var(--muted);
-}
-
-.create-available-meta {
-  color: var(--muted);
-  font-size: 11px;
-  margin-top: 2px;
 }
 
 /* ---------- Confirm modal ---------- */

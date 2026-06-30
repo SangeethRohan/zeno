@@ -12,6 +12,10 @@ services:
 
     restart: unless-stopped
 
+    labels:
+      zeno.app: "true"
+      zeno.app.kind: "core"
+
     ports:
       - "9090:9090"
 

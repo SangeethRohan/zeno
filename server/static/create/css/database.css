@@ -1,0 +1,46 @@
+#view-create-db {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.optional-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+
+.table-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--panel-2);
+}
+
+.table-block-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.table-block-head input {
+  flex: 1;
+}
+
+.col-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.col-row input {
+  flex: 2;
+}
+
+.col-row select {
+  flex: 1;
+}

@@ -429,6 +429,12 @@ def activity_summary():
 
 CORE_GROUP_ID = "core-apps"
 CORE_GROUP_NAME = "Core Apps"
+EXISTING_GROUP_ID = "existing"
+EXISTING_GROUP_NAME = "Existing"
+GROUP_MY_DATABASES = "My Databases"
+GROUP_MY_SERVERS = "My Servers"
+GROUP_MY_WEB = "My Web Servers"
+ZENO_KIND_CORE = "core"
 
 
 def _slug_group(name):
@@ -436,38 +442,65 @@ def _slug_group(name):
     return s or "group"
 
 
+def _ensure_system_groups(groups, by_id):
+    """Ensure locked Core Apps and default Existing groups exist."""
+    if CORE_GROUP_ID not in by_id:
+        core = {
+            "id": CORE_GROUP_ID,
+            "name": CORE_GROUP_NAME,
+            "locked": True,
+            "order": 0,
+        }
+        groups.insert(0, core)
+        by_id[CORE_GROUP_ID] = core
+    if EXISTING_GROUP_ID not in by_id:
+        existing = {
+            "id": EXISTING_GROUP_ID,
+            "name": EXISTING_GROUP_NAME,
+            "locked": False,
+            "order": 1,
+        }
+        groups.append(existing)
+        by_id[EXISTING_GROUP_ID] = existing
+    return groups, by_id
+
+
 def build_default_layout(container_items):
     """Build layout from container default_group values."""
-    groups = [{
-        "id": CORE_GROUP_ID,
-        "name": CORE_GROUP_NAME,
-        "locked": True,
-        "order": 0,
-    }]
+    groups = []
+    by_id = {}
+    groups, by_id = _ensure_system_groups(groups, by_id)
     assignments = {}
-    seen = {CORE_GROUP_ID: groups[0]}
-    order = 1
+    order = 2
 
     for item in container_items:
         name = item["name"]
-        default = item.get("default_group") or item.get("group") or "Other"
-        if item.get("is_core_app") or default == CORE_GROUP_NAME:
+        if item.get("is_core_app"):
             assignments[name] = CORE_GROUP_ID
             continue
+
+        default = item.get("default_group") or item.get("group") or EXISTING_GROUP_NAME
+        if default == CORE_GROUP_NAME:
+            assignments[name] = CORE_GROUP_ID
+            continue
+        if default == EXISTING_GROUP_NAME:
+            assignments[name] = EXISTING_GROUP_ID
+            continue
+
         gid = _slug_group(default)
         base = gid
         n = 2
-        while gid in seen and seen[gid]["name"] != default:
+        while gid in by_id and by_id[gid]["name"] != default:
             gid = f"{base}-{n}"
             n += 1
-        if gid not in seen:
-            seen[gid] = {
+        if gid not in by_id:
+            by_id[gid] = {
                 "id": gid,
                 "name": default,
                 "locked": False,
                 "order": order,
             }
-            groups.append(seen[gid])
+            groups.append(by_id[gid])
             order += 1
         assignments[name] = gid
 
@@ -532,15 +565,7 @@ def merge_layout_with_containers(layout, container_items):
     groups = list(layout.get("groups") or [])
     assignments = dict(layout.get("assignments") or {})
     by_id = {g["id"]: g for g in groups}
-
-    if CORE_GROUP_ID not in by_id:
-        groups.insert(0, {
-            "id": CORE_GROUP_ID,
-            "name": CORE_GROUP_NAME,
-            "locked": True,
-            "order": 0,
-        })
-        by_id[CORE_GROUP_ID] = groups[0]
+    groups, by_id = _ensure_system_groups(groups, by_id)
 
     max_order = max((g.get("order", 0) for g in groups), default=0)
 
@@ -551,7 +576,15 @@ def merge_layout_with_containers(layout, container_items):
             continue
         if name in assignments and assignments[name] in by_id:
             continue
-        default = item.get("default_group") or "Other"
+
+        default = item.get("default_group") or EXISTING_GROUP_NAME
+        if default == CORE_GROUP_NAME:
+            assignments[name] = CORE_GROUP_ID
+            continue
+        if default == EXISTING_GROUP_NAME:
+            assignments[name] = EXISTING_GROUP_ID
+            continue
+
         gid = _slug_group(default)
         if gid not in by_id:
             max_order += 1
@@ -584,8 +617,8 @@ def apply_layout_to_containers(container_items, layout):
             item["group"] = grp["name"]
             item["group_id"] = gid
         else:
-            item["group"] = item.get("default_group", "Other")
-            item["group_id"] = gid or "other"
+            item["group"] = item.get("default_group", EXISTING_GROUP_NAME)
+            item["group_id"] = gid or EXISTING_GROUP_ID
     return container_items
 
 

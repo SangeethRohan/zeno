@@ -17,6 +17,12 @@ import psutil
 from dotenv import load_dotenv
 
 import db as zeno_db
+from create import register_create_routes
+from create.constants import (
+    USER_DB_LABEL_VALUE,
+    USER_SERVER_LABEL_VALUE,
+    USER_WEB_LABEL_VALUE,
+)
 
 load_dotenv()
 
@@ -32,16 +38,7 @@ client = docker.from_env()
 DASH_USER = os.environ.get("DASHBOARD_USER")
 DASH_PASS = os.environ.get("DASHBOARD_PASS")
 
-# Optional quick-open links for containers that expose a web UI.
-OPEN_LINKS = {
-    "dev_nginx": 8080,
-    "dev_adminer": 8081,
-    "dev_pgadmin": 5050,
-    "dev_redisinsight": 5540,
-    "dev_n8n": 5678,
-    "dev_portainer": 9000,
-}
-
+# Optional quick-open: detect published HTTP ports on web-like images (no name map).
 WEB_UI_IMAGES = {
     "dvwa",
     "web-dvwa",
@@ -55,48 +52,11 @@ WEB_UI_IMAGES = {
     "wordpress",
 }
 
-# Static grouping for the original compose-defined containers.
-GROUPS = {
-    "dev_db_postgreSQL": "Databases",
-    "dev_db_mysql": "Databases",
-    "dev_db_mongo": "Databases",
-    "dev_db_redis": "Databases",
-    "dev_db_memcached": "Databases",
-    "dev_nginx": "Tools & UI",
-    "dev_adminer": "Tools & UI",
-    "dev_pgadmin": "Tools & UI",
-    "dev_redisinsight": "Tools & UI",
-    "dev_n8n": "Automation",
-}
-
 LABEL_APP = "zeno.app"
 LABEL_KIND = "zeno.app.kind"
 LABEL_ENGINE = "zeno.app.engine"
-USER_DB_LABEL_VALUE = "user-db"
-USER_SERVER_LABEL_VALUE = "user-server"
-USER_WEB_LABEL_VALUE = "user-web"
 
-WEB_SERVER_DEFAULTS = {
-    "nginx": {"image": "nginx:alpine", "port": 80},
-    "apache": {"image": "httpd:alpine", "port": 80},
-    "caddy": {"image": "caddy:alpine", "port": 80},
-    "traefik": {"image": "traefik:v3.0", "port": 80},
-}
-
-UBUNTU_IMAGE = "ubuntu:24.04"
-VALID_LANGUAGES = {"python", "java", "c", "cpp", "go", "node", "rust"}
-
-# Per-engine defaults for spinning up a new database container.
-ENGINE_DEFAULTS = {
-    "postgres": {"image": "postgres:16", "port": 5432, "volume_path": "/var/lib/postgresql/data"},
-    "mysql":    {"image": "mysql:8",     "port": 3306, "volume_path": "/var/lib/mysql"},
-    "mongo":    {"image": "mongo:latest","port": 27017,"volume_path": "/data/db"},
-    "redis":    {"image": "redis:latest","port": 6379, "volume_path": "/data"},
-}
-
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,40}$")
 USER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}$")
-CORE_APP_NAMES = {"zeno_dashboard", "zeno_mongo"}
 
 _terminal_cwd = {}
 _terminal_shells = {}
@@ -157,7 +117,7 @@ def tier_payload():
 def can_manage_container_group(group):
     if is_admin():
         return True
-    return group != "Core Apps"
+    return group != zeno_db.CORE_GROUP_NAME
 
 
 def can_manage_container_obj(container):
@@ -241,13 +201,38 @@ def port_in_use(port: int) -> bool:
 
 
 def port_in_use_error(port: int):
+    if port in published_host_ports():
+        return f"Port {port} is already used by another container on this host."
     if port_in_use(port):
         return f"Port {port} is already in use on this host."
     return None
 
 
+def published_host_ports():
+    """Host ports already published by running/stopped containers."""
+    ports = set()
+    try:
+        for container in client.containers.list(all=True):
+            network_ports = (
+                container.attrs.get("NetworkSettings", {}).get("Ports") or {}
+            )
+            for bindings in network_ports.values():
+                if not bindings:
+                    continue
+                for binding in bindings:
+                    host = binding.get("HostPort")
+                    if host:
+                        ports.add(int(host))
+    except APIError:
+        pass
+    return ports
+
+
 def find_free_port(start: int, end: int):
+    published = published_host_ports()
     for port in range(start, end + 1):
+        if port in published:
+            continue
         if not port_in_use(port):
             return port
     return None
@@ -525,20 +510,21 @@ def serialize(container):
     labels = attrs.get("Config", {}).get("Labels") or {}
 
     kind = labels.get(LABEL_KIND)
+    is_core_app = kind == zeno_db.ZENO_KIND_CORE
     is_user_db = kind == USER_DB_LABEL_VALUE
     is_user_server = kind == USER_SERVER_LABEL_VALUE
     is_user_web = kind == USER_WEB_LABEL_VALUE
 
-    if name in CORE_APP_NAMES or "zeno_dashboard" in name:
-        group = "Core Apps"
+    if is_core_app:
+        group = zeno_db.CORE_GROUP_NAME
     elif is_user_db:
-        group = "My Databases"
+        group = zeno_db.GROUP_MY_DATABASES
     elif is_user_server:
-        group = "My Servers"
+        group = zeno_db.GROUP_MY_SERVERS
     elif is_user_web:
-        group = "My Web Servers"
+        group = zeno_db.GROUP_MY_WEB
     else:
-        group = GROUPS.get(name, "Other")
+        group = zeno_db.EXISTING_GROUP_NAME
 
     # -------------------------
     # WEB UI DETECTION (IMPORTANT FIX)
@@ -579,22 +565,13 @@ def serialize(container):
 
     # ONLY web UIs can have open button
     elif is_web_ui:
-        # 1. try static mapping
-        open_port = OPEN_LINKS.get(cname)
+        for cport, bindings in network_ports.items():
+            if bindings:
+                host = bindings[0].get("HostPort")
+                if host:
+                    open_port = int(host)
+                    break
 
-        # 2. fallback to docker port mapping
-        if open_port is None:
-            for cport, bindings in network_ports.items():
-                if bindings:
-                    host = bindings[0].get("HostPort")
-                    if host:
-                        open_port = int(host)
-                        break
-
-    # -------------------------
-    # RETURN
-    # -------------------------
-    is_core_app = group == "Core Apps"
     return {
         "id": container.short_id,
         "name": name,
@@ -1099,7 +1076,7 @@ def create_group():
     name = (body.get("name") or "").strip()
     if not name or len(name) > 48:
         return jsonify({"error": "Group name must be 1-48 characters."}), 400
-    if name == zeno_db.CORE_GROUP_NAME:
+    if name in (zeno_db.CORE_GROUP_NAME, zeno_db.EXISTING_GROUP_NAME):
         return jsonify({"error": "That group name is reserved."}), 400
 
     containers = client.containers.list(all=True)
@@ -1125,8 +1102,8 @@ def create_group():
 @app.route(f"{API_PREFIX}/groups/<group_id>", methods=["DELETE"])
 @requires_auth
 def delete_group(group_id):
-    if group_id == zeno_db.CORE_GROUP_ID:
-        return jsonify({"error": "Core Apps cannot be deleted."}), 400
+    if group_id in (zeno_db.CORE_GROUP_ID, zeno_db.EXISTING_GROUP_ID):
+        return jsonify({"error": "System groups cannot be deleted."}), 400
 
     containers = client.containers.list(all=True)
     data = [serialize(c) for c in containers]
@@ -1138,10 +1115,16 @@ def delete_group(group_id):
     if grp.get("locked"):
         return jsonify({"error": "This group is locked."}), 400
 
-    fallback = next(
-        (g["id"] for g in layout["groups"] if g["id"] != group_id and not g.get("locked")),
-        None,
+    fallback = (
+        zeno_db.EXISTING_GROUP_ID
+        if group_id != zeno_db.EXISTING_GROUP_ID
+        else None
     )
+    if not fallback:
+        fallback = next(
+            (g["id"] for g in layout["groups"] if g["id"] != group_id and not g.get("locked")),
+            None,
+        )
     for cname, gid in list(layout["assignments"].items()):
         if gid == group_id:
             if fallback:
@@ -1698,7 +1681,7 @@ def central_logs_api():
 
         ser = serialize(c)
         group = ser.get("group", "")
-        if group != "Core Apps" and not can_manage_container_group(group):
+        if group != zeno_db.CORE_GROUP_NAME and not can_manage_container_group(group):
             return jsonify({"error": f"Access denied for {name}"}), 403
 
         try:
@@ -1923,535 +1906,21 @@ def host_details():
 
 
 
-# ---------------------------------------------------------------------------
-# Dynamic database creation
-# ---------------------------------------------------------------------------
-
-def _build_sql_create_table(table, dialect):
-    cols = table.get("columns") or []
-    if not cols:
-        cols = [{"name": "id", "type": "INTEGER"}]
-    col_sql = ", ".join(f'{c["name"]} {c["type"]}' for c in cols)
-    return f'CREATE TABLE IF NOT EXISTS {table["name"]} ({col_sql});'
-
-
-def _wait_and_exec(container, attempts, delay, cmd, env=None):
-    """Retry an exec_run until it succeeds (exit_code 0) or attempts run out."""
-    last_output = b""
-    for _ in range(attempts):
-        try:
-            result = container.exec_run(cmd, environment=env)
-            if result.exit_code == 0:
-                return True, result.output.decode("utf-8", errors="replace")
-            last_output = result.output
-        except APIError as e:
-            last_output = str(e).encode()
-        time.sleep(delay)
-    return False, last_output.decode("utf-8", errors="replace") if isinstance(last_output, bytes) else str(last_output)
-
-
-def _create_tables_or_collections(container, engine, username, password, db_name, tables):
-    if not tables:
-        return []
-    results = []
-    for table in tables:
-        tname = table["name"]
-        if engine == "postgres":
-            sql = _build_sql_create_table(table, "postgres")
-            ok, out = _wait_and_exec(
-                container, 1, 0,
-                ["psql", "-U", username, "-d", db_name, "-c", sql],
-                env={"PGPASSWORD": password},
-            )
-        elif engine == "mysql":
-            sql = _build_sql_create_table(table, "mysql")
-            ok, out = _wait_and_exec(
-                container, 1, 0,
-                ["mysql", "-u", "root", f"-p{password}", db_name, "-e", sql],
-            )
-        elif engine == "mongo":
-            ok, out = _wait_and_exec(
-                container, 1, 0,
-                ["mongosh", "--quiet", db_name,
-                 "-u", username, "-p", password, "--authenticationDatabase", "admin",
-                 "--eval", f"db.createCollection('{tname}')"],
-            )
-        else:
-            ok, out = False, "Tables are not applicable for this engine."
-        results.append({"table": tname, "ok": ok, "detail": out.strip()[:500]})
-    return results
-
-
-def _wait_until_ready(container, engine, username, password, db_name):
-    if engine == "postgres":
-        ok, _ = _wait_and_exec(container, 25, 1, ["pg_isready", "-U", username])
-    elif engine == "mysql":
-        ok, _ = _wait_and_exec(container, 40, 1.5, ["mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", f"-p{password}"])
-    elif engine == "mongo":
-        ok, _ = _wait_and_exec(
-            container, 30, 1,
-            ["mongosh", "--quiet", "--eval", "db.runCommand({ping:1})",
-             "-u", username, "-p", password, "--authenticationDatabase", "admin"],
-        )
-    elif engine == "redis":
-        ok, _ = _wait_and_exec(container, 15, 1, ["redis-cli", "-a", password, "ping"])
-    else:
-        ok = True
-    return ok
-
-
-@app.route(f"{API_PREFIX}/databases", methods=["GET"])
-@requires_auth
-def list_databases():
-    containers = client.containers.list(all=True, filters={"label": f"{LABEL_KIND}={USER_DB_LABEL_VALUE}"})
-    return jsonify([serialize(c) for c in containers])
-
-@app.route(f"{API_PREFIX}/databases", methods=["POST"])
-@requires_auth
-@require_feature("create_database")
-def create_database():
-    body = request.get_json(force=True, silent=True) or {}
-
-    engine = (body.get("engine") or "").strip().lower()
-    name = (body.get("name") or "").strip().lower()
-
-    username = (body.get("username") or "").strip()
-    password = body.get("password") or ""
-    db_name = (body.get("db_name") or "").strip()
-
-    host_port = body.get("host_port")
-    tables = body.get("tables") or []
-    persistent = bool(body.get("persistent", True))
-
-    # ---------------- ENGINE VALIDATION ----------------
-    if engine not in ENGINE_DEFAULTS:
-        return jsonify({
-            "error": "Unknown engine. Choose postgres, mysql, mongo, or redis."
-        }), 400
-
-    # ---------------- NAME VALIDATION ----------------
-    if not NAME_RE.match(name):
-        return jsonify({
-            "error": "Name must be lowercase letters/numbers/_/- , 2-40 chars."
-        }), 400
-
-    # ---------------- REQUIRED FIELD RULES ----------------
-    if not host_port:
-        return jsonify({"error": "host_port is required."}), 400
-
-    try:
-        host_port = int(host_port)
-    except (TypeError, ValueError):
-        return jsonify({"error": "host_port must be a valid number."}), 400
-
-    if host_port < 1:
-        return jsonify({"error": "Port cannot be zero or negative."}), 400
-    if host_port < 1024:
-        return jsonify({"error": "Port must be at least 1024."}), 400
-    if host_port > 65535:
-        return jsonify({"error": "Port cannot exceed 65535."}), 400
-
-    if not password or len(password) < 4:
-        return jsonify({
-            "error": "Password must be at least 4 characters."
-        }), 400
-
-    if engine != "redis":
-        if not username:
-            return jsonify({"error": "Username is required for this engine."}), 400
-        if not db_name:
-            return jsonify({"error": "Database name is required for this engine."}), 400
-
-    # ---------------- CONTAINER NAMES ----------------
-    container_name = f"zeno_userdb_{name}"
-    volume_name = f"{container_name}_data"
-
-    # ---------------- EXISTENCE CHECK ----------------
-    try:
-        client.containers.get(container_name)
-        return jsonify({
-            "error": f"A database named '{name}' already exists."
-        }), 409
-    except NotFound:
-        pass
-
-    if port_in_use(host_port):
-        return jsonify({
-            "error": f"Port {host_port} is already in use on this host."
-        }), 409
-
-    # ---------------- ENGINE CONFIG ----------------
-    defaults = ENGINE_DEFAULTS[engine]
-    image = defaults["image"]
-    container_port = defaults["port"]
-    volume_path = defaults["volume_path"]
-
-    env = {}
-    command = None
-
-    if engine == "postgres":
-        env = {
-            "POSTGRES_USER": username,
-            "POSTGRES_PASSWORD": password,
-            "POSTGRES_DB": db_name
-        }
-
-    elif engine == "mysql":
-        env = {
-            "MYSQL_ROOT_PASSWORD": password,
-            "MYSQL_DATABASE": db_name,
-            "MYSQL_USER": username,
-            "MYSQL_PASSWORD": password
-        }
-
-    elif engine == "mongo":
-        env = {
-            "MONGO_INITDB_ROOT_USERNAME": username,
-            "MONGO_INITDB_ROOT_PASSWORD": password
-        }
-
-    elif engine == "redis":
-        command = ["redis-server", "--requirepass", password]
-
-    # ---------------- IMAGE CHECK ----------------
-    try:
-        client.images.get(image)
-    except ImageNotFound:
-        try:
-            client.images.pull(image)
-        except APIError as e:
-            return jsonify({
-                "error": f"Could not pull image {image}: {str(e)}"
-            }), 500
-
-    # ---------------- RUN CONTAINER ----------------
-    try:
-        run_args = {
-            "image": image,
-            "name": container_name,
-            "command": command,
-            "environment": env,
-            "ports": {f"{container_port}/tcp": host_port},
-            "labels": {
-                LABEL_KIND: USER_DB_LABEL_VALUE,
-                LABEL_ENGINE: engine,
-                "zeno.app": "true",
-                "zeno.version": APP_VERSION,
-                "stackcontrol.persistent": str(persistent).lower(),
-            },
-            "detach": True,
-        }
-
-        if persistent:
-            client.volumes.create(name=volume_name)
-            run_args["volumes"] = {
-                volume_name: {
-                    "bind": volume_path,
-                    "mode": "rw"
-                }
-            }
-            run_args["restart_policy"] = {"Name": "unless-stopped"}
-
-        container = client.containers.run(**run_args)
-
-    except APIError as e:
-        return jsonify({
-            "error": f"Failed to create container: {str(e)}"
-        }), 500
-
-    # ---------------- POST SETUP ----------------
-    ready = _wait_until_ready(container, engine, username, password, db_name)
-
-    table_results = []
-    if ready and tables:
-        table_results = _create_tables_or_collections(
-            container, engine, username, password, db_name, tables
-        )
-
-    log_container_activity("create", container, details=f"database:{engine}")
-
-    return jsonify({
-        "container": serialize(container),
-        "ready": ready,
-        "tables": table_results,
-        "warning": None if ready else (
-            "Container is starting but not yet healthy. "
-            "Check logs if needed."
-        ),
-    }), 201
-
-@app.route(f"{API_PREFIX}/databases/<name>", methods=["DELETE"])
-@requires_auth
-def delete_database(name):
-    container_name = name if name.startswith("zeno_userdb_") else f"zeno_userdb_{name}"
-    remove_volume = request.args.get("remove_volume", "false").lower() == "true"
-    try:
-        c = client.containers.get(container_name)
-    except NotFound:
-        return jsonify({"error": f"No database container named {name}"}), 404
-
-    labels = c.attrs.get("Config", {}).get("Labels") or {}
-    if labels.get(LABEL_KIND) != USER_DB_LABEL_VALUE:
-        return jsonify({"error": "This container was not created by the dashboard; refusing to delete."}), 400
-
-    try:
-        c.reload()
-
-        if c.status == "running":
-            return jsonify({
-                "error": "Stop the database before deleting it."
-            }), 400
-
-        log_container_activity("delete", c)
-        c.remove()
-        if remove_volume:
-            try:
-                client.volumes.get(f"{container_name}_data").remove()
-            except NotFound:
-                pass
-    except APIError as e:
-        return jsonify({"error": str(e)}), 500
-
-    return jsonify({"deleted": container_name, "volume_removed": remove_volume})
-
-
-def _ubuntu_setup_script(languages):
-    """Build shell script to install optional dev languages and sample files."""
-    packages = ["curl", "wget", "git", "vim", "nano", "build-essential"]
-    samples = []
-
-    if "python" in languages:
-        packages.extend(["python3", "python3-pip", "python3-venv"])
-        samples.append(
-            'cat > /workspace/samples/hello.py << \'EOF\'\n'
-            'print("Hello from Python")\nEOF'
-        )
-    if "java" in languages:
-        packages.append("default-jdk")
-        samples.append(
-            'cat > /workspace/samples/Hello.java << \'EOF\'\n'
-            'public class Hello {\n'
-            '  public static void main(String[] args) {\n'
-            '    System.out.println("Hello from Java");\n'
-            '  }\n'
-            '}\nEOF'
-        )
-    if "c" in languages:
-        packages.append("gcc")
-        samples.append(
-            'cat > /workspace/samples/hello.c << \'EOF\'\n'
-            '#include <stdio.h>\n'
-            'int main() {\n'
-            '  printf("Hello from C\\n");\n'
-            '  return 0;\n'
-            '}\nEOF'
-        )
-    if "cpp" in languages:
-        packages.append("g++")
-        samples.append(
-            'cat > /workspace/samples/hello.cpp << \'EOF\'\n'
-            '#include <iostream>\n'
-            'int main() {\n'
-            '  std::cout << "Hello from C++" << std::endl;\n'
-            '  return 0;\n'
-            '}\nEOF'
-        )
-    if "go" in languages:
-        packages.append("golang-go")
-        samples.append(
-            'mkdir -p /workspace/samples/go && '
-            'cat > /workspace/samples/go/main.go << \'EOF\'\n'
-            'package main\n'
-            'import "fmt"\n'
-            'func main() { fmt.Println("Hello from Go") }\nEOF'
-        )
-    if "node" in languages:
-        packages.extend(["nodejs", "npm"])
-        samples.append(
-            'cat > /workspace/samples/hello.js << \'EOF\'\n'
-            'console.log("Hello from Node.js");\nEOF'
-        )
-    if "rust" in languages:
-        samples.append(
-            'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | '
-            'sh -s -- -y && . $HOME/.cargo/env'
-        )
-        samples.append(
-            'cat > /workspace/samples/hello.rs << \'EOF\'\n'
-            'fn main() { println!("Hello from Rust"); }\nEOF'
-        )
-
-    pkg_line = " ".join(sorted(set(packages)))
-    sample_cmds = "\n".join(samples) if samples else "true"
-    return f"""#!/bin/bash
-set -e
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq {pkg_line}
-mkdir -p /workspace/samples
-{sample_cmds}
-touch /workspace/.ready
-"""
-
-
-@app.route(f"{API_PREFIX}/servers/ubuntu", methods=["POST"])
-@requires_auth
-@require_feature("create_ubuntu")
-def create_ubuntu_server():
-    body = request.get_json(force=True, silent=True) or {}
-    name = (body.get("name") or "").strip().lower()
-    persistent = bool(body.get("persistent", True))
-    raw_langs = body.get("languages") or []
-    languages = [l for l in raw_langs if l in VALID_LANGUAGES]
-
-    if not re.match(r"^[a-z0-9][a-z0-9_-]{1,30}$", name):
-        return jsonify({
-            "error": "Name must be 2-31 chars: lowercase letters, numbers, _ or -"
-        }), 400
-
-    container_name = f"zeno_ubuntu_{name}"
-    try:
-        client.containers.get(container_name)
-        return jsonify({"error": f"Server {name} already exists."}), 409
-    except NotFound:
-        pass
-
-    labels = {
-        LABEL_KIND: USER_SERVER_LABEL_VALUE,
-        "zeno.name": name,
-        "zeno.created_by": current_username(),
-    }
-    if languages:
-        labels["zeno.languages"] = ",".join(languages)
-
-    volumes = {}
-    if persistent:
-        vol_name = f"{container_name}_workspace"
-        try:
-            client.volumes.get(vol_name)
-        except NotFound:
-            client.volumes.create(name=vol_name)
-        volumes[vol_name] = {"bind": "/workspace", "mode": "rw"}
-
-    try:
-        container = client.containers.run(
-            UBUNTU_IMAGE,
-            name=container_name,
-            detach=True,
-            tty=True,
-            stdin_open=True,
-            command=["/bin/bash", "-c", "sleep infinity"],
-            volumes=volumes,
-            labels=labels,
-            restart_policy={"Name": "unless-stopped"},
-        )
-    except APIError as e:
-        return jsonify({"error": str(e)}), 500
-
-    setup = _ubuntu_setup_script(languages)
-    try:
-        container.exec_run(
-            ["/bin/bash", "-c", setup],
-            detach=False,
-        )
-    except APIError:
-        pass
-
-    container.reload()
-    log_container_activity(
-        "create", container, details=f"ubuntu:{','.join(languages) or 'base'}"
-    )
-    return jsonify({
-        "container": serialize(container),
-        "languages": languages,
-        "workspace": "/workspace",
-    }), 201
-
-
-@app.route(f"{API_PREFIX}/servers/web", methods=["POST"])
-@requires_auth
-@require_feature("create_web_server")
-def create_web_server():
-    body = request.get_json(force=True, silent=True) or {}
-    name = (body.get("name") or "").strip().lower()
-    server_type = (body.get("type") or "nginx").strip().lower()
-    host_port = body.get("host_port")
-    persistent = bool(body.get("persistent", False))
-
-    if not re.match(r"^[a-z0-9][a-z0-9_-]{1,30}$", name):
-        return jsonify({
-            "error": "Name must be 2-31 chars: lowercase letters, numbers, _ or -"
-        }), 400
-
-    if server_type not in WEB_SERVER_DEFAULTS:
-        types = ", ".join(sorted(WEB_SERVER_DEFAULTS))
-        return jsonify({"error": f"Type must be one of: {types}"}), 400
-
-    spec = WEB_SERVER_DEFAULTS[server_type]
-    container_name = f"zeno_web_{name}"
-    try:
-        client.containers.get(container_name)
-        return jsonify({"error": f"Web server {name} already exists."}), 409
-    except NotFound:
-        pass
-
-    if host_port is not None:
-        try:
-            host_port = int(host_port)
-            if host_port < 1 or host_port > 65535:
-                raise ValueError()
-        except (TypeError, ValueError):
-            return jsonify({"error": "Host port must be 1-65535."}), 400
-        err = port_in_use_error(host_port)
-        if err:
-            return jsonify({"error": err}), 409
-    else:
-        host_port = find_free_port(8080, 8999)
-        if host_port is None:
-            return jsonify({"error": "No free port in range 8080-8999."}), 503
-
-    labels = {
-        LABEL_KIND: USER_WEB_LABEL_VALUE,
-        "zeno.name": name,
-        "zeno.web_type": server_type,
-        "zeno.created_by": current_username(),
-    }
-
-    volumes = {}
-    if persistent and server_type in ("nginx", "apache", "caddy"):
-        vol_name = f"{container_name}_html"
-        try:
-            client.volumes.get(vol_name)
-        except NotFound:
-            client.volumes.create(name=vol_name)
-        mount_path = {
-            "nginx": "/usr/share/nginx/html",
-            "apache": "/usr/local/apache2/htdocs",
-            "caddy": "/usr/share/caddy",
-        }[server_type]
-        volumes[vol_name] = {"bind": mount_path, "mode": "rw"}
-
-    port_key = f"{spec['port']}/tcp"
-    try:
-        container = client.containers.run(
-            spec["image"],
-            name=container_name,
-            detach=True,
-            ports={port_key: host_port},
-            volumes=volumes,
-            labels=labels,
-            restart_policy={"Name": "unless-stopped"},
-        )
-    except APIError as e:
-        return jsonify({"error": str(e)}), 500
-
-    container.reload()
-    log_container_activity("create", container, details=f"web:{server_type}")
-    return jsonify({
-        "container": serialize(container),
-        "url": f"http://localhost:{host_port}",
-        "type": server_type,
-    }), 201
+register_create_routes(app, client, {
+    "api_prefix": API_PREFIX,
+    "app_version": APP_VERSION,
+    "label_kind": LABEL_KIND,
+    "label_engine": LABEL_ENGINE,
+    "requires_auth": requires_auth,
+    "require_feature": require_feature,
+    "serialize": serialize,
+    "log_container_activity": log_container_activity,
+    "current_username": current_username,
+    "port_in_use": port_in_use,
+    "port_in_use_error": port_in_use_error,
+    "find_free_port": find_free_port,
+    "published_host_ports": published_host_ports,
+})
 
 
 @app.route("/", methods=["GET"])
